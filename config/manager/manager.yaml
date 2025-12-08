@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karpetrack-controller
+  namespace: karpetrack-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: karpetrack
+  template:
+    metadata:
+      labels:
+        app: karpetrack
+    spec:
+      serviceAccountName: karpetrack-controller
+      containers:
+        - name: controller
+          image: controller:latest
+          args:
+            - --leader-elect=true
+            - --pricing-refresh-interval=30s
+            - --optimization-threshold=0.20
+          env:
+            - name: RACKSPACE_SPOT_REFRESH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: karpetrack-credentials
+                  key: refresh-token
+            - name: RACKSPACE_SPOT_CLOUDSPACE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: karpetrack-credentials
+                  key: cloudspace-id
+          ports:
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: health
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi

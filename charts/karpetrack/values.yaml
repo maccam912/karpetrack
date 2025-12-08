@@ -1,0 +1,94 @@
+# Karpetrack Helm Chart Values
+
+# Number of controller replicas
+replicaCount: 2
+
+image:
+  repository: ghcr.io/karpetrack/karpetrack
+  pullPolicy: IfNotPresent
+  # Overrides the image tag (default is appVersion)
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Create a service account
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # Name of the service account (generated if not set)
+  name: ""
+
+# Rackspace Spot credentials
+credentials:
+  # Create a secret with credentials (set to false to use existing secret)
+  create: true
+  # Name of existing secret (if create is false)
+  existingSecret: ""
+  # Rackspace Spot refresh token
+  refreshToken: ""
+  # Rackspace Spot cloudspace ID
+  cloudspaceId: ""
+
+# Controller configuration
+controller:
+  # Enable leader election for HA
+  leaderElect: true
+  # How often to refresh pricing data
+  pricingRefreshInterval: "30s"
+  # Minimum savings percentage to trigger node replacement (0.20 = 20%)
+  optimizationThreshold: "0.20"
+  # Enable node consolidation
+  consolidationEnabled: true
+  # How long to batch pending pods before provisioning
+  batchWindow: "10s"
+  # How long a node must be empty before removal
+  emptyNodeGracePeriod: "5m"
+  # Enable mock mode for testing
+  mockMode: false
+
+# Pod resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node selector for controller pods
+nodeSelector: {}
+
+# Tolerations for controller pods
+tolerations: []
+
+# Affinity rules for controller pods
+affinity: {}
+
+# Pod security context
+podSecurityContext: {}
+
+# Container security context
+securityContext: {}
+
+# Metrics configuration
+metrics:
+  port: 8080
+
+# Health probes configuration
+health:
+  port: 8081
+
+# Install CRDs (set to false if managing CRDs separately)
+installCRDs: true
+
+# Additional environment variables
+extraEnv: []
+
+# Additional volume mounts
+extraVolumeMounts: []
+
+# Additional volumes
+extraVolumes: []

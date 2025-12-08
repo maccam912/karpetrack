@@ -1,0 +1,127 @@
+{{- if .Values.installCRDs -}}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: spotnodepools.karpetrack.io
+  labels:
+    {{- include "karpetrack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  group: karpetrack.io
+  names:
+    kind: SpotNodePool
+    listKind: SpotNodePoolList
+    plural: spotnodepools
+    singular: spotnodepool
+    shortNames:
+      - snp
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                regions:
+                  type: array
+                  items:
+                    type: string
+                categories:
+                  type: array
+                  items:
+                    type: string
+                maxPrice:
+                  type: string
+                requirements:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                      operator:
+                        type: string
+                      values:
+                        type: array
+                        items:
+                          type: string
+                limits:
+                  type: object
+                  properties:
+                    cpu:
+                      anyOf: [{type: integer}, {type: string}]
+                      x-kubernetes-int-or-string: true
+                    memory:
+                      anyOf: [{type: integer}, {type: string}]
+                      x-kubernetes-int-or-string: true
+                disruption:
+                  type: object
+                  properties:
+                    consolidationPolicy:
+                      type: string
+                      enum: [WhenEmpty, WhenUnderutilized]
+                    consolidateAfter:
+                      type: string
+                    expireAfter:
+                      type: string
+                taints:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                      value:
+                        type: string
+                      effect:
+                        type: string
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+            status:
+              type: object
+              properties:
+                nodeCount:
+                  type: integer
+                resources:
+                  type: object
+                  properties:
+                    cpu:
+                      anyOf: [{type: integer}, {type: string}]
+                      x-kubernetes-int-or-string: true
+                    memory:
+                      anyOf: [{type: integer}, {type: string}]
+                      x-kubernetes-int-or-string: true
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Nodes
+          type: integer
+          jsonPath: .status.nodeCount
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+{{- end }}
