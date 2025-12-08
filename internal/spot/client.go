@@ -14,7 +14,7 @@ type Client struct {
 	pricing      *PricingProvider
 
 	// Mock mode for testing without real API
-	mockMode bool
+	mockMode  bool
 	mockNodes map[string]*Node
 	mockMu    sync.RWMutex
 

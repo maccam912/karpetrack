@@ -121,8 +121,8 @@ func (r *OptimizerController) shouldReplaceNode(
 	ctx context.Context,
 	spotNode *karpetrackv1alpha1.SpotNode,
 ) (bool, *spot.InstanceOption, float64, error) {
-	// Get current price
-	currentPrice, err := r.Pricing.GetPriceForInstance(ctx, spotNode.Spec.Region, spotNode.Spec.InstanceType)
+	// Verify current instance pricing is available
+	_, err := r.Pricing.GetPriceForInstance(ctx, spotNode.Spec.Region, spotNode.Spec.InstanceType)
 	if err != nil {
 		return false, nil, 0, err
 	}
@@ -204,11 +204,11 @@ func (r *OptimizerController) replaceNode(
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: fmt.Sprintf("karpetrack-%s-", oldNode.Spec.NodePoolRef),
 			Labels: map[string]string{
-				"karpetrack.io/nodepool":   oldNode.Spec.NodePoolRef,
-				"karpetrack.io/region":     alternative.Region,
-				"karpetrack.io/category":   alternative.Category,
-				"karpetrack.io/replaces":   oldNode.Name,
-				"karpetrack.io/reason":     "price-optimization",
+				"karpetrack.io/nodepool": oldNode.Spec.NodePoolRef,
+				"karpetrack.io/region":   alternative.Region,
+				"karpetrack.io/category": alternative.Category,
+				"karpetrack.io/replaces": oldNode.Name,
+				"karpetrack.io/reason":   "price-optimization",
 			},
 		},
 		Spec: karpetrackv1alpha1.SpotNodeSpec{
