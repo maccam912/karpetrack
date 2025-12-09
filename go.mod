@@ -1,4 +1,4 @@
-module github.com/karpetrack/karpetrack
+module github.com/maccam912/karpetrack
 
 go 1.23.5
 

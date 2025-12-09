@@ -4,7 +4,7 @@
 replicaCount: 2
 
 image:
-  repository: ghcr.io/karpetrack/karpetrack
+  repository: ghcr.io/maccam912/karpetrack
   pullPolicy: IfNotPresent
   # Overrides the image tag (default is appVersion)
   tag: ""

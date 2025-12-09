@@ -7,7 +7,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/karpetrack/karpetrack/internal/spot"
+	"github.com/maccam912/karpetrack/internal/spot"
 )
 
 // CostOptimizer finds the cheapest node configurations for pending pods

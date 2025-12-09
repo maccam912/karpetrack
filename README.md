@@ -107,7 +107,7 @@ cost optimization, inspired by [Karpenter](https://karpenter.sh/).
        namespace: flux-system
    spec:
        interval: 5m
-       url: https://github.com/karpetrack/karpetrack
+       url: https://github.com/maccam912/karpetrack
        ref:
            branch: main
    ```
@@ -160,23 +160,23 @@ cost optimization, inspired by [Karpenter](https://karpenter.sh/).
 
 ### Helm Values
 
-| Parameter                           | Description                          | Default                         |
-| ----------------------------------- | ------------------------------------ | ------------------------------- |
-| `replicaCount`                      | Number of controller replicas        | `2`                             |
-| `image.repository`                  | Container image repository           | `ghcr.io/karpetrack/karpetrack` |
-| `image.tag`                         | Container image tag                  | `appVersion`                    |
-| `credentials.create`                | Create credentials secret            | `true`                          |
-| `credentials.existingSecret`        | Use existing secret                  | `""`                            |
-| `credentials.refreshToken`          | Rackspace Spot refresh token         | `""`                            |
-| `credentials.cloudspaceId`          | Rackspace Spot cloudspace ID         | `""`                            |
-| `controller.leaderElect`            | Enable leader election               | `true`                          |
-| `controller.pricingRefreshInterval` | Price check interval                 | `30s`                           |
-| `controller.optimizationThreshold`  | Min savings to trigger replacement   | `0.20`                          |
-| `controller.consolidationEnabled`   | Enable node consolidation            | `true`                          |
-| `controller.batchWindow`            | Pod batching window                  | `10s`                           |
-| `controller.emptyNodeGracePeriod`   | Time before removing empty nodes     | `5m`                            |
-| `controller.mockMode`               | Enable mock mode (no real API calls) | `false`                         |
-| `installCRDs`                       | Install CRDs with Helm               | `true`                          |
+| Parameter                           | Description                          | Default                        |
+| ----------------------------------- | ------------------------------------ | ------------------------------ |
+| `replicaCount`                      | Number of controller replicas        | `2`                            |
+| `image.repository`                  | Container image repository           | `ghcr.io/maccam912/karpetrack` |
+| `image.tag`                         | Container image tag                  | `appVersion`                   |
+| `credentials.create`                | Create credentials secret            | `true`                         |
+| `credentials.existingSecret`        | Use existing secret                  | `""`                           |
+| `credentials.refreshToken`          | Rackspace Spot refresh token         | `""`                           |
+| `credentials.cloudspaceId`          | Rackspace Spot cloudspace ID         | `""`                           |
+| `controller.leaderElect`            | Enable leader election               | `true`                         |
+| `controller.pricingRefreshInterval` | Price check interval                 | `30s`                          |
+| `controller.optimizationThreshold`  | Min savings to trigger replacement   | `0.20`                         |
+| `controller.consolidationEnabled`   | Enable node consolidation            | `true`                         |
+| `controller.batchWindow`            | Pod batching window                  | `10s`                          |
+| `controller.emptyNodeGracePeriod`   | Time before removing empty nodes     | `5m`                           |
+| `controller.mockMode`               | Enable mock mode (no real API calls) | `false`                        |
+| `installCRDs`                       | Install CRDs with Helm               | `true`                         |
 
 ## Usage
 

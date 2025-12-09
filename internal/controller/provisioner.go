@@ -13,9 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	karpetrackv1alpha1 "github.com/karpetrack/karpetrack/api/v1alpha1"
-	"github.com/karpetrack/karpetrack/internal/scheduler"
-	"github.com/karpetrack/karpetrack/internal/spot"
+	karpetrackv1alpha1 "github.com/maccam912/karpetrack/api/v1alpha1"
+	"github.com/maccam912/karpetrack/internal/scheduler"
+	"github.com/maccam912/karpetrack/internal/spot"
 )
 
 // ProvisionerController watches for unschedulable pods and provisions nodes

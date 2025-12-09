@@ -10,8 +10,8 @@ keywords:
   - rackspace
   - cost-optimization
   - karpenter
-home: https://github.com/karpetrack/karpetrack
+home: https://github.com/maccam912/karpetrack
 sources:
-  - https://github.com/karpetrack/karpetrack
+  - https://github.com/maccam912/karpetrack
 maintainers:
-  - name: karpetrack
+  - name: maccam912

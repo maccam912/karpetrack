@@ -14,9 +14,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	karpetrackv1alpha1 "github.com/karpetrack/karpetrack/api/v1alpha1"
-	"github.com/karpetrack/karpetrack/internal/controller"
-	"github.com/karpetrack/karpetrack/internal/spot"
+	karpetrackv1alpha1 "github.com/maccam912/karpetrack/api/v1alpha1"
+	"github.com/maccam912/karpetrack/internal/controller"
+	"github.com/maccam912/karpetrack/internal/spot"
 )
 
 var (

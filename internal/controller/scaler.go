@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	karpetrackv1alpha1 "github.com/karpetrack/karpetrack/api/v1alpha1"
+	karpetrackv1alpha1 "github.com/maccam912/karpetrack/api/v1alpha1"
 )
 
 // ScalerController handles scale-down of empty or underutilized nodes
