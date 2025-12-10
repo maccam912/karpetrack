@@ -31,6 +31,7 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/controller"]
           args:
             - --leader-elect={{ .Values.controller.leaderElect }}
             - --pricing-refresh-interval={{ .Values.controller.pricingRefreshInterval }}
