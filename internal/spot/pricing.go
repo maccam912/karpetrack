@@ -24,6 +24,15 @@ const (
 	DefaultCacheTTL = 30 * time.Second
 )
 
+// categoryAliases maps shorthand category names to full API category names
+var categoryAliases = map[string]string{
+	"gp":  "General Purpose",
+	"ch":  "Compute Heavy",
+	"mh":  "Memory Heavy",
+	"bm":  "Bare Metal",
+	"gpu": "GPU",
+}
+
 // PricingProvider fetches and caches spot pricing data
 type PricingProvider struct {
 	endpoint  string
@@ -307,9 +316,17 @@ func (p *PricingProvider) meetsRequirements(opt InstanceOption, reqs Requirement
 	if len(reqs.Categories) > 0 {
 		found := false
 		for _, c := range reqs.Categories {
+			// Try direct match first
 			if strings.EqualFold(c, opt.Category) {
 				found = true
 				break
+			}
+			// Try alias match (e.g., "gp" -> "General Purpose")
+			if alias, ok := categoryAliases[strings.ToLower(c)]; ok {
+				if strings.EqualFold(alias, opt.Category) {
+					found = true
+					break
+				}
 			}
 		}
 		if !found {
