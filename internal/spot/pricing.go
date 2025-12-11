@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,6 +165,14 @@ func (p *PricingProvider) GetCheapestInstances(ctx context.Context, reqs Require
 		return nil, err
 	}
 
+	slog.Debug("Filtering instance options",
+		"totalOptions", len(allOptions),
+		"regions", reqs.Regions,
+		"categories", reqs.Categories,
+		"minCPU", reqs.MinCPU.String(),
+		"minMemory", reqs.MinMemory.String(),
+		"maxPrice", reqs.MaxPrice)
+
 	// Filter by requirements
 	var filtered []InstanceOption
 	for _, opt := range allOptions {
@@ -171,6 +180,20 @@ func (p *PricingProvider) GetCheapestInstances(ctx context.Context, reqs Require
 			continue
 		}
 		filtered = append(filtered, opt)
+	}
+
+	slog.Debug("Filtered instance options",
+		"filteredCount", len(filtered),
+		"totalCount", len(allOptions))
+
+	if len(filtered) > 0 {
+		slog.Debug("First matching instance",
+			"region", filtered[0].Region,
+			"instanceType", filtered[0].InstanceType,
+			"category", filtered[0].Category,
+			"cpu", filtered[0].CPU,
+			"memoryGB", filtered[0].MemoryGB,
+			"price", filtered[0].PricePerHour)
 	}
 
 	// Sort by price (cheapest first)
@@ -284,7 +307,7 @@ func (p *PricingProvider) meetsRequirements(opt InstanceOption, reqs Requirement
 	if len(reqs.Categories) > 0 {
 		found := false
 		for _, c := range reqs.Categories {
-			if c == opt.Category {
+			if strings.EqualFold(c, opt.Category) {
 				found = true
 				break
 			}
@@ -294,7 +317,7 @@ func (p *PricingProvider) meetsRequirements(opt InstanceOption, reqs Requirement
 		}
 	} else {
 		// Default: exclude GPU unless explicitly requested
-		if opt.Category == "gpu" {
+		if strings.EqualFold(opt.Category, "GPU") {
 			return false
 		}
 	}
