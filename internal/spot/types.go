@@ -3,6 +3,7 @@ package spot
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -22,12 +23,21 @@ func (f *FlexInt) UnmarshalJSON(data []byte) error {
 	// Try string
 	var strVal string
 	if err := json.Unmarshal(data, &strVal); err == nil {
-		parsed, err := strconv.Atoi(strVal)
-		if err != nil {
-			return err
+		// Strip common suffixes like "GB"
+		strVal = strings.TrimSuffix(strVal, "GB")
+		strVal = strings.TrimSpace(strVal)
+
+		// Try parsing as float first (handles "3.75", "7.5", etc.)
+		if floatVal, err := strconv.ParseFloat(strVal, 64); err == nil {
+			*f = FlexInt(int(floatVal))
+			return nil
 		}
-		*f = FlexInt(parsed)
-		return nil
+
+		// Fall back to int parsing
+		if parsed, err := strconv.Atoi(strVal); err == nil {
+			*f = FlexInt(parsed)
+			return nil
+		}
 	}
 
 	return nil
