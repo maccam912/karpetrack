@@ -67,6 +67,10 @@ tolerations: []
 # Affinity rules for controller pods
 affinity: {}
 
+# Priority class for controller pods (default: system-cluster-critical)
+# This ensures karpetrack runs even under resource pressure
+priorityClassName: "system-cluster-critical"
+
 # Pod security context
 podSecurityContext: {}
 

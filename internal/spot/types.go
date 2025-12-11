@@ -17,15 +17,15 @@ type RegionData struct {
 
 // ServerClass represents a single instance type with its pricing
 type ServerClass struct {
-	DisplayName  string `json:"display_name"`
-	Category     string `json:"category"`
-	Description  string `json:"description"`
-	CPU          int    `json:"cpu"`
-	Memory       int    `json:"memory"` // in GB
-	MarketPrice  string `json:"market_price"`
-	Percentile20 string `json:"20_percentile"`
-	Percentile50 string `json:"50_percentile"`
-	Percentile80 string `json:"80_percentile"`
+	DisplayName  string  `json:"display_name"`
+	Category     string  `json:"category"`
+	Description  string  `json:"description"`
+	CPU          int     `json:"cpu"`
+	Memory       int     `json:"memory"` // in GB
+	MarketPrice  string  `json:"market_price"`
+	Percentile20 float64 `json:"20_percentile"`
+	Percentile50 float64 `json:"50_percentile"`
+	Percentile80 float64 `json:"80_percentile"`
 }
 
 // InstanceOption represents a potential instance to provision

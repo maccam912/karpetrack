@@ -19,6 +19,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "karpetrack.serviceAccountName" . }}
+      priorityClassName: {{ .Values.priorityClassName | default "system-cluster-critical" }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
