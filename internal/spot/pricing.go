@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -107,8 +108,12 @@ func (p *PricingProvider) refresh(ctx context.Context) (*PricingData, error) {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
+	// Log raw response for debugging
+	slog.Debug("Raw pricing API response", "body", string(body), "length", len(body))
+
 	var data PricingData
 	if err := json.Unmarshal(body, &data); err != nil {
+		slog.Error("Failed to parse pricing data", "error", err, "rawBody", string(body))
 		if p.cache != nil {
 			return p.cache, nil
 		}
@@ -141,8 +146,8 @@ func (p *PricingProvider) GetInstanceTypes(ctx context.Context) ([]InstanceOptio
 				InstanceType: instanceType,
 				DisplayName:  serverClass.DisplayName,
 				Category:     serverClass.Category,
-				CPU:          serverClass.CPU,
-				MemoryGB:     serverClass.Memory,
+				CPU:          int(serverClass.CPU),
+				MemoryGB:     int(serverClass.Memory),
 				PricePerHour: price,
 				Generation:   region.Generation,
 			})

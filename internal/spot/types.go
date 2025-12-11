@@ -1,8 +1,37 @@
 package spot
 
 import (
+	"encoding/json"
+	"strconv"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 )
+
+// FlexInt is an int that can be unmarshalled from either a string or int JSON value
+type FlexInt int
+
+// UnmarshalJSON implements custom JSON unmarshalling for FlexInt
+func (f *FlexInt) UnmarshalJSON(data []byte) error {
+	// Try int first
+	var intVal int
+	if err := json.Unmarshal(data, &intVal); err == nil {
+		*f = FlexInt(intVal)
+		return nil
+	}
+
+	// Try string
+	var strVal string
+	if err := json.Unmarshal(data, &strVal); err == nil {
+		parsed, err := strconv.Atoi(strVal)
+		if err != nil {
+			return err
+		}
+		*f = FlexInt(parsed)
+		return nil
+	}
+
+	return nil
+}
 
 // PricingData represents the complete pricing data from Rackspace Spot
 type PricingData struct {
@@ -20,8 +49,8 @@ type ServerClass struct {
 	DisplayName  string  `json:"display_name"`
 	Category     string  `json:"category"`
 	Description  string  `json:"description"`
-	CPU          int     `json:"cpu"`
-	Memory       int     `json:"memory"` // in GB
+	CPU          FlexInt `json:"cpu"`
+	Memory       FlexInt `json:"memory"` // in GB
 	MarketPrice  string  `json:"market_price"`
 	Percentile20 float64 `json:"20_percentile"`
 	Percentile50 float64 `json:"50_percentile"`
