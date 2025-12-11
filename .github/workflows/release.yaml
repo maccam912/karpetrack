@@ -93,7 +93,7 @@ jobs:
 
       - name: Push Helm chart to GHCR
         run: |
-          helm push .cr-release-packages/karpetrack-${{ steps.version.outputs.version }}.tgz oci://ghcr.io/${{ github.repository_owner }}
+          helm push .cr-release-packages/karpetrack-${{ steps.version.outputs.version }}.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
 
       - name: Upload Helm chart as release asset
         uses: softprops/action-gh-release@v2
