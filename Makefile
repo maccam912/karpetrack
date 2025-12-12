@@ -49,6 +49,10 @@ build: fmt vet ## Build manager binary.
 build-optimize: fmt vet ## Build optimize CLI binary.
 	go build -o bin/karpetrack-optimize ./cmd/optimize
 
+.PHONY: build-discover-minbids
+build-discover-minbids: fmt vet ## Build discover-minbids CLI binary.
+	go build -o bin/discover-minbids ./cmd/discover-minbids
+
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./cmd/controller
