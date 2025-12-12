@@ -38,6 +38,7 @@ type Config struct {
 	// Rackspace Spot
 	RefreshToken string
 	CloudspaceID string
+	Org          string
 	MockMode     bool
 
 	// Controller settings
@@ -66,6 +67,7 @@ func main() {
 	// Rackspace Spot flags
 	flag.StringVar(&config.RefreshToken, "refresh-token", "", "Rackspace Spot refresh token (or set RACKSPACE_SPOT_REFRESH_TOKEN)")
 	flag.StringVar(&config.CloudspaceID, "cloudspace-id", "", "Rackspace Spot cloudspace ID (or set RACKSPACE_SPOT_CLOUDSPACE_ID)")
+	flag.StringVar(&config.Org, "org", "", "Rackspace Spot organization name (or set RACKSPACE_SPOT_ORG)")
 	flag.BoolVar(&config.MockMode, "mock-mode", false, "Enable mock mode for testing without real Spot API")
 
 	// Controller behavior flags
@@ -95,6 +97,9 @@ func main() {
 	if config.CloudspaceID == "" {
 		config.CloudspaceID = os.Getenv("RACKSPACE_SPOT_CLOUDSPACE_ID")
 	}
+	if config.Org == "" {
+		config.Org = os.Getenv("RACKSPACE_SPOT_ORG")
+	}
 
 	// Validate configuration
 	if !config.MockMode {
@@ -104,6 +109,10 @@ func main() {
 		}
 		if config.CloudspaceID == "" {
 			setupLog.Error(nil, "Rackspace Spot cloudspace ID is required")
+			os.Exit(1)
+		}
+		if config.Org == "" {
+			setupLog.Error(nil, "Rackspace Spot organization is required")
 			os.Exit(1)
 		}
 	}
@@ -126,6 +135,7 @@ func main() {
 	spotClient, err := spot.NewClient(spot.ClientConfig{
 		RefreshToken: config.RefreshToken,
 		CloudspaceID: config.CloudspaceID,
+		Org:          config.Org,
 		MockMode:     config.MockMode,
 	})
 	if err != nil {

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -191,52 +192,66 @@ func (r *SpotNodeController) handleProvisioning(
 		}
 	}
 
-	// Check node status via Spot API
-	node, err := r.SpotClient.GetNode(ctx, spotNode.Status.ProviderID)
-	if err != nil {
-		log.Error(err, "Failed to get node status from Spot API")
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
+	// With the pool-based model, we need to find unclaimed Kubernetes nodes
+	// that match our server class. Rackspace Spot creates nodes asynchronously
+	// and they register with Kubernetes with labels we can match.
 
-	if node.Status != "running" {
-		log.Info("Node not yet running", "status", node.Status)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-
-	// Check if Kubernetes node exists and is ready
-	var k8sNode corev1.Node
-	nodeName := node.Name // The name the node registers with
-	if nodeName == "" {
-		nodeName = node.ID
-	}
-
-	err = r.Get(ctx, client.ObjectKey{Name: nodeName}, &k8sNode)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("Kubernetes node not yet registered", "nodeName", nodeName)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
+	// Look for Kubernetes nodes that:
+	// 1. Are managed by karpetrack (have the karpetrack.io/managed label)
+	// 2. Match our server class
+	// 3. Are not yet claimed by another SpotNode resource
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Check if node is ready
-	nodeReady := false
-	for _, condition := range k8sNode.Status.Conditions {
-		if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
-			nodeReady = true
+	var claimedNode *corev1.Node
+	for i := range nodeList.Items {
+		k8sNode := &nodeList.Items[i]
+
+		// Check if this node is from a karpetrack-managed pool
+		// Nodes from Rackspace Spot pools get labels from the pool's CustomLabels
+		if k8sNode.Labels["karpetrack.io/managed"] != "true" {
+			continue
+		}
+
+		// Check if node matches our server class (via sanitized label)
+		nodeServerClass := k8sNode.Labels["karpetrack.io/server-class"]
+		expectedServerClass := sanitizeServerClass(spotNode.Spec.InstanceType)
+		if nodeServerClass != expectedServerClass {
+			continue
+		}
+
+		// Check if this node is already claimed by another SpotNode
+		if isClaimed, _ := r.isNodeClaimed(ctx, k8sNode.Name); isClaimed {
+			continue
+		}
+
+		// Check if node is ready
+		nodeReady := false
+		for _, condition := range k8sNode.Status.Conditions {
+			if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+				nodeReady = true
+				break
+			}
+		}
+
+		if nodeReady {
+			claimedNode = k8sNode
 			break
 		}
 	}
 
-	if !nodeReady {
-		log.Info("Kubernetes node not yet ready", "nodeName", nodeName)
+	if claimedNode == nil {
+		log.Info("Waiting for Kubernetes node to appear",
+			"serverClass", spotNode.Spec.InstanceType)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	// Node is running and ready
-	log.Info("Node is running and ready", "nodeName", nodeName)
+	// Found and claiming node
+	log.Info("Found ready node, claiming", "nodeName", claimedNode.Name)
 
-	spotNode.Status.NodeName = nodeName
+	spotNode.Status.NodeName = claimedNode.Name
 	spotNode.Status.Phase = karpetrackv1alpha1.SpotNodePhaseRunning
 	now := metav1.Now()
 	spotNode.Status.LastPriceCheck = &now
@@ -253,9 +268,36 @@ func (r *SpotNodeController) handleProvisioning(
 	}
 
 	r.Recorder.Eventf(spotNode, corev1.EventTypeNormal, "NodeReady",
-		"Node %s is ready", nodeName)
+		"Node %s is ready", claimedNode.Name)
 
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
+
+// isNodeClaimed checks if a Kubernetes node is already claimed by a SpotNode
+func (r *SpotNodeController) isNodeClaimed(ctx context.Context, nodeName string) (bool, error) {
+	var spotNodes karpetrackv1alpha1.SpotNodeList
+	if err := r.List(ctx, &spotNodes); err != nil {
+		return false, err
+	}
+
+	for _, sn := range spotNodes.Items {
+		if sn.Status.NodeName == nodeName {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// sanitizeServerClass converts a server class name to the label format
+func sanitizeServerClass(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, ".", "-")
+	s = strings.ReplaceAll(s, "_", "-")
+	if len(s) > 40 {
+		s = s[:40]
+	}
+	return s
 }
 
 // handleRunning monitors a running node
