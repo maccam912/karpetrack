@@ -1,7 +1,9 @@
 # Karpetrack Helm Chart Values
 
 # Number of controller replicas
-replicaCount: 2
+# Note: With leader election enabled, only one replica is active at a time.
+# Multiple replicas provide HA failover but consume more resources.
+replicaCount: 1
 
 image:
   repository: ghcr.io/maccam912/karpetrack
@@ -69,7 +71,10 @@ resources:
     memory: 128Mi
 
 # Node selector for controller pods
-nodeSelector: {}
+# IMPORTANT: Karpetrack should run on a non-managed "critical" node to avoid
+# chicken-and-egg problems (karpetrack can't provision itself)
+nodeSelector:
+  critical: "true"
 
 # Tolerations for controller pods
 tolerations: []
