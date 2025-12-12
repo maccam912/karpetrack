@@ -40,6 +40,9 @@ spec:
             - --consolidation-enabled={{ .Values.controller.consolidationEnabled }}
             - --batch-window={{ .Values.controller.batchWindow }}
             - --empty-node-grace-period={{ .Values.controller.emptyNodeGracePeriod }}
+            - --periodic-optimization-enabled={{ .Values.controller.periodicOptimization.enabled }}
+            - --periodic-optimization-interval={{ .Values.controller.periodicOptimization.interval }}
+            - --periodic-removal-delay={{ .Values.controller.periodicOptimization.removalDelay }}
             {{- if .Values.controller.mockMode }}
             - --mock-mode=true
             {{- end }}

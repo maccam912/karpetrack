@@ -46,6 +46,11 @@ type Config struct {
 	ConsolidationEnabled   bool
 	BatchWindow            time.Duration
 	EmptyNodeGracePeriod   time.Duration
+
+	// Periodic optimizer settings
+	PeriodicOptimizationEnabled  bool
+	PeriodicOptimizationInterval time.Duration
+	PeriodicRemovalDelay         time.Duration
 }
 
 func main() {
@@ -69,6 +74,11 @@ func main() {
 	flag.BoolVar(&config.ConsolidationEnabled, "consolidation-enabled", true, "Enable node consolidation")
 	flag.DurationVar(&config.BatchWindow, "batch-window", 10*time.Second, "How long to batch pending pods before provisioning")
 	flag.DurationVar(&config.EmptyNodeGracePeriod, "empty-node-grace-period", 5*time.Minute, "How long a node must be empty before removal")
+
+	// Periodic optimizer flags
+	flag.BoolVar(&config.PeriodicOptimizationEnabled, "periodic-optimization-enabled", true, "Enable periodic cluster-wide optimization")
+	flag.DurationVar(&config.PeriodicOptimizationInterval, "periodic-optimization-interval", 30*time.Minute, "How often to run periodic optimization")
+	flag.DurationVar(&config.PeriodicRemovalDelay, "periodic-removal-delay", 20*time.Minute, "How long to wait after adding new nodes before removing old ones")
 
 	opts := zap.Options{
 		Development: true,
@@ -175,6 +185,22 @@ func main() {
 		}
 	}
 
+	// Setup Periodic Optimizer controller (two-phase cluster-wide optimization)
+	if config.PeriodicOptimizationEnabled {
+		periodicOptimizerController := controller.NewPeriodicOptimizerController(
+			mgr.GetClient(),
+			spotClient,
+			recorder,
+		)
+		periodicOptimizerController.OptimizationInterval = config.PeriodicOptimizationInterval
+		periodicOptimizerController.RemovalDelay = config.PeriodicRemovalDelay
+		periodicOptimizerController.Threshold = config.OptimizationThreshold
+		if err := periodicOptimizerController.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "PeriodicOptimizer")
+			os.Exit(1)
+		}
+	}
+
 	// Setup health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
@@ -190,6 +216,9 @@ func main() {
 		"optimizationThreshold", config.OptimizationThreshold,
 		"pricingRefreshInterval", config.PricingRefreshInterval,
 		"consolidationEnabled", config.ConsolidationEnabled,
+		"periodicOptimizationEnabled", config.PeriodicOptimizationEnabled,
+		"periodicOptimizationInterval", config.PeriodicOptimizationInterval,
+		"periodicRemovalDelay", config.PeriodicRemovalDelay,
 	)
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

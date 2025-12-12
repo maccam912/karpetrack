@@ -49,6 +49,16 @@ controller:
   # Enable mock mode for testing
   mockMode: false
 
+  # Periodic optimization settings (two-phase cluster-wide optimization)
+  periodicOptimization:
+    # Enable periodic cluster-wide optimization
+    enabled: true
+    # How often to run optimization checks
+    interval: "30m"
+    # How long to wait after adding new nodes before removing old ones
+    # This ensures new capacity is ready before old capacity is drained
+    removalDelay: "20m"
+
 # Pod resource limits and requests
 resources:
   limits:
