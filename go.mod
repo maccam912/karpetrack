@@ -5,6 +5,7 @@ go 1.23.5
 toolchain go1.24.2
 
 require (
+	github.com/rackspace-spot/spot-go-sdk v0.1.0
 	k8s.io/api v0.30.0
 	k8s.io/apimachinery v0.30.0
 	k8s.io/client-go v0.30.0
