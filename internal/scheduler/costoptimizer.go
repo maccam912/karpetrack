@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -69,6 +70,12 @@ func (co *CostOptimizer) FindOptimalConfiguration(
 		return &OptimizationResult{}, nil
 	}
 
+	slog.Info("Finding optimal configuration",
+		"podCount", len(pods),
+		"regions", constraints.Regions,
+		"categories", constraints.Categories,
+		"maxPricePerNode", constraints.MaxPricePerNode)
+
 	// Get available instance types with current pricing
 	nodeTypes, err := co.getAvailableNodeTypes(ctx, constraints)
 	if err != nil {
@@ -76,8 +83,14 @@ func (co *CostOptimizer) FindOptimalConfiguration(
 	}
 
 	if len(nodeTypes) == 0 {
+		slog.Warn("No node types available after filtering",
+			"regions", constraints.Regions,
+			"categories", constraints.Categories,
+			"maxPricePerNode", constraints.MaxPricePerNode)
 		return nil, fmt.Errorf("no node types available matching constraints")
 	}
+
+	slog.Info("Found available node types", "count", len(nodeTypes))
 
 	// Run bin packing to find optimal configuration
 	packingResults, err := co.binPacker.Pack(pods, nodeTypes)
