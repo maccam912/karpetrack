@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -306,7 +307,7 @@ func (r *ProvisionerController) provisionNodesForPods(
 				Labels: map[string]string{
 					"karpetrack.io/nodepool": nodePool.Name,
 					"karpetrack.io/region":   nodeRec.Region,
-					"karpetrack.io/category": nodeRec.Category,
+					"karpetrack.io/category": sanitizeLabelValue(nodeRec.Category),
 				},
 			},
 			Spec: karpetrackv1alpha1.SpotNodeSpec{
@@ -398,4 +399,35 @@ func PodFilter(obj client.Object) bool {
 		return false
 	}
 	return isUnschedulable(pod)
+}
+
+// sanitizeLabelValue converts a string to a valid Kubernetes label value.
+// Label values must be 63 characters or less and must consist of alphanumeric
+// characters, '-', '_', or '.', and must start and end with an alphanumeric.
+func sanitizeLabelValue(s string) string {
+	// Convert to lowercase and replace spaces with hyphens
+	result := strings.ToLower(s)
+	result = strings.ReplaceAll(result, " ", "-")
+
+	// Replace any other invalid characters with hyphens
+	var sanitized strings.Builder
+	for i, c := range result {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' {
+			sanitized.WriteRune(c)
+		} else if i > 0 {
+			sanitized.WriteRune('-')
+		}
+	}
+	result = sanitized.String()
+
+	// Trim leading/trailing non-alphanumeric characters
+	result = strings.Trim(result, "-_.")
+
+	// Truncate to 63 characters if needed
+	if len(result) > 63 {
+		result = result[:63]
+		result = strings.TrimRight(result, "-_.")
+	}
+
+	return result
 }
