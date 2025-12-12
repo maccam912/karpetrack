@@ -26,6 +26,7 @@ serviceAccount:
 # Rackspace Spot credentials
 credentials:
   # Create a secret with credentials (set to false to use existing secret)
+  # Won't overwrite existing secrets unless refreshToken AND cloudspaceId are both provided
   create: true
   # Name of existing secret (if create is false)
   existingSecret: ""
