@@ -45,6 +45,10 @@ lint: ## Run golangci-lint
 build: fmt vet ## Build manager binary.
 	go build -o bin/controller ./cmd/controller
 
+.PHONY: build-optimize
+build-optimize: fmt vet ## Build optimize CLI binary.
+	go build -o bin/karpetrack-optimize ./cmd/optimize
+
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
 	go run ./cmd/controller
