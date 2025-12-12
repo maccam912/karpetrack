@@ -22,6 +22,9 @@ const (
 
 	// DefaultCacheTTL is how long to cache pricing data
 	DefaultCacheTTL = 30 * time.Second
+
+	// MinimumBidPrice is the universal minimum bid for all Rackspace Spot instances ($0.001/hr)
+	MinimumBidPrice = 0.001
 )
 
 // categoryAliases maps shorthand category names to full API category names

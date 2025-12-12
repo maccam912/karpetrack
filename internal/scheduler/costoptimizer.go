@@ -38,6 +38,11 @@ type OptimizationConstraints struct {
 
 	// Maximum total hourly cost
 	MaxTotalCost float64
+
+	// DaemonSetOverhead is the per-node resource overhead from DaemonSet pods.
+	// When set, this overhead is subtracted from each node's capacity before
+	// fitting regular pods, ensuring nodes aren't oversubscribed.
+	DaemonSetOverhead *DaemonSetOverhead
 }
 
 // OptimizationResult contains the recommended node configuration
@@ -92,8 +97,17 @@ func (co *CostOptimizer) FindOptimalConfiguration(
 
 	slog.Info("Found available node types", "count", len(nodeTypes))
 
+	// Create a bin packer with overhead if specified
+	binPacker := co.binPacker
+	if constraints.DaemonSetOverhead != nil {
+		binPacker = NewBinPackerWithOverhead(constraints.DaemonSetOverhead)
+		slog.Info("Using daemonset overhead in bin packing",
+			"cpu", constraints.DaemonSetOverhead.CPU.String(),
+			"memory", constraints.DaemonSetOverhead.Memory.String())
+	}
+
 	// Run bin packing to find optimal configuration
-	packingResults, err := co.binPacker.Pack(pods, nodeTypes)
+	packingResults, err := binPacker.Pack(pods, nodeTypes)
 	if err != nil {
 		return nil, fmt.Errorf("bin packing: %w", err)
 	}

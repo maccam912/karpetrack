@@ -19,12 +19,25 @@ type PackingResult struct {
 type BinPacker struct {
 	// MinUtilization is the minimum acceptable utilization for a node
 	MinUtilization float64
+
+	// DaemonSetOverhead is the per-node resource overhead from DaemonSet pods.
+	// When set, this overhead is subtracted from each node's capacity before
+	// fitting regular pods, ensuring nodes aren't oversubscribed.
+	DaemonSetOverhead *DaemonSetOverhead
 }
 
 // NewBinPacker creates a new bin packer
 func NewBinPacker() *BinPacker {
 	return &BinPacker{
 		MinUtilization: 0.5, // 50% minimum utilization
+	}
+}
+
+// NewBinPackerWithOverhead creates a new bin packer with daemonset overhead
+func NewBinPackerWithOverhead(overhead *DaemonSetOverhead) *BinPacker {
+	return &BinPacker{
+		MinUtilization:    0.5,
+		DaemonSetOverhead: overhead,
 	}
 }
 
@@ -176,7 +189,13 @@ func (bp *BinPacker) packSingleLargeNode(pods []PodRequirements, nodeTypes []Nod
 		totalMem.Add(pod.Memory)
 	}
 
-	// Find smallest node that fits all pods
+	// Add DaemonSet overhead to required capacity
+	if bp.DaemonSetOverhead != nil {
+		totalCPU.Add(bp.DaemonSetOverhead.CPU)
+		totalMem.Add(bp.DaemonSetOverhead.Memory)
+	}
+
+	// Find smallest node that fits all pods (including overhead)
 	for _, nodeType := range nodeTypes {
 		if nodeType.CPU.Cmp(totalCPU) >= 0 && nodeType.Memory.Cmp(totalMem) >= 0 {
 			return []PackingResult{{
@@ -221,6 +240,17 @@ func (bp *BinPacker) fitPodsToNode(pods []PodRequirements, node NodeCapacity) []
 		CPU:    node.CPU.DeepCopy(),
 		Memory: node.Memory.DeepCopy(),
 		GPU:    node.GPU.DeepCopy(),
+	}
+
+	// Subtract DaemonSet overhead from available capacity first
+	if bp.DaemonSetOverhead != nil {
+		remaining.CPU.Sub(bp.DaemonSetOverhead.CPU)
+		remaining.Memory.Sub(bp.DaemonSetOverhead.Memory)
+
+		// If overhead exceeds node capacity, no pods can fit
+		if remaining.CPU.Sign() < 0 || remaining.Memory.Sign() < 0 {
+			return nil
+		}
 	}
 
 	var fitting []PodRequirements
