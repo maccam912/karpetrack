@@ -250,6 +250,22 @@ func (p *PricingProvider) GetPriceForInstance(ctx context.Context, region, insta
 	return strconv.ParseFloat(serverClass.MarketPrice, 64)
 }
 
+// GetPriceForServerClass returns the current market price for a server class identifier
+// Server class format: category.generation.size-region (e.g., "gp.vs1.medium-dfw")
+func (p *PricingProvider) GetPriceForServerClass(ctx context.Context, serverClass string) (float64, error) {
+	// Parse server class to extract region and base instance type
+	// Format: category.generation.size-region (e.g., "gp.vs1.medium-dfw")
+	lastDash := strings.LastIndex(serverClass, "-")
+	if lastDash == -1 {
+		return 0, fmt.Errorf("invalid server class format: %s", serverClass)
+	}
+
+	baseType := serverClass[:lastDash] // e.g., "gp.vs1.medium"
+	region := serverClass[lastDash+1:] // e.g., "dfw"
+
+	return p.GetPriceForInstance(ctx, region, baseType)
+}
+
 // FindCheaperAlternative finds a cheaper instance that can replace the given one
 func (p *PricingProvider) FindCheaperAlternative(
 	ctx context.Context,

@@ -110,10 +110,17 @@ func (c *Client) CreateNode(ctx context.Context, spec NodeSpec) (*Node, error) {
 	// Server class in Rackspace is the instance type (e.g., "gp.vs1.medium-dfw")
 	serverClass := spec.InstanceType
 
-	// Determine bid price
+	// Determine bid price - use live market price, not stale static prices
 	bidPrice := spec.BidPrice
 	if bidPrice <= 0 {
-		bidPrice = GetMinBidPrice(serverClass) * 1.1 // 10% above minimum
+		// Try to get live market price from pricing API
+		// Server class format includes region: "gp.vs1.medium-dfw"
+		if marketPrice, err := c.pricing.GetPriceForServerClass(ctx, serverClass); err == nil && marketPrice > 0 {
+			bidPrice = marketPrice * 1.1 // 10% above live market price
+		} else {
+			// Fallback to static min bid prices only if API fails
+			bidPrice = GetMinBidPrice(serverClass) * 1.1
+		}
 	}
 
 	// List existing pools to find one for this server class
