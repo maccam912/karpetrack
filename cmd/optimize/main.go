@@ -385,7 +385,7 @@ var minBidPrices = map[string]float64{
 	"ch.vs1.large-dfw": 0.01, "ch.vs1.large-hkg": 0.01, "ch.vs1.large-iad": 0.005,
 	"ch.vs1.large-lon": 0.02, "ch.vs1.large-ord": 0.01, "ch.vs1.large-syd": 0.01,
 	"ch.vs1.xlarge-dfw": 0.005, "ch.vs1.xlarge-hkg": 0.005, "ch.vs1.xlarge-iad": 0.005,
-	"ch.vs1.xlarge-lon": 0.1, "ch.vs1.xlarge-ord": 0.005, "ch.vs1.xlarge-syd": 0.005,
+	"ch.vs1.xlarge-lon": 0.1, "ch.vs1.xlarge-ord": 0.015, "ch.vs1.xlarge-syd": 0.005,
 	"ch.vs1.2xlarge-dfw": 0.01, "ch.vs1.2xlarge-hkg": 0.01, "ch.vs1.2xlarge-iad": 0.01,
 	"ch.vs1.2xlarge-lon": 0.01, "ch.vs1.2xlarge-ord": 0.01, "ch.vs1.2xlarge-syd": 0.01,
 	// Compute Heavy VS2
