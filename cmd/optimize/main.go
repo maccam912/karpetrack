@@ -36,7 +36,10 @@ type Config struct {
 	Org          string
 	Cloudspace   string
 	DryRun       bool
+	DelayDestroy bool
 }
+
+const destroyDelayDuration = 20 * time.Minute
 
 type OutputResult struct {
 	PodCount          int          `json:"podCount"`
@@ -85,6 +88,7 @@ func main() {
 	// Apply flags
 	flag.BoolVar(&config.Apply, "apply", false, "Apply the optimal configuration by creating/updating node pools")
 	flag.BoolVar(&config.DryRun, "dry-run", false, "Show what would be applied without making changes")
+	flag.BoolVar(&config.DelayDestroy, "delay-destroy", false, "Wait 20 minutes before destroying outdated node pools after creating replacements")
 	flag.StringVar(&config.RefreshToken, "refresh-token", os.Getenv("RACKSPACE_SPOT_REFRESH_TOKEN"), "Rackspace Spot refresh token")
 	flag.StringVar(&config.Org, "org", os.Getenv("RACKSPACE_SPOT_ORG"), "Rackspace Spot organization name")
 	flag.StringVar(&config.Cloudspace, "cloudspace", os.Getenv("RACKSPACE_SPOT_CLOUDSPACE"), "Rackspace Spot cloudspace name")
@@ -251,6 +255,11 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 
 	// Track which pools we've handled
 	handledPools := make(map[string]bool)
+	type pendingDeletion struct {
+		serverClass string
+		pool        *rxtspot.SpotNodePool
+	}
+	var poolsToDelete []pendingDeletion
 
 	// Create or update desired pools
 	for serverClass, plan := range desiredPools {
@@ -306,15 +315,30 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 		// Check if this pool is managed by karpetrack via labels
 		isManaged := pool.CustomLabels["karpetrack.io/managed"] == "true"
 		if !handledPools[serverClass] && isManaged {
-			fmt.Printf("➖ DELETE: %s (name: %s)\n", serverClass, pool.Name)
-			if !config.DryRun {
-				err := spotClient.DeleteSpotNodePool(ctx, config.Org, pool.Name)
-				if err != nil {
-					return fmt.Errorf("deleting node pool %s: %w", pool.Name, err)
-				}
-				fmt.Printf("   ✓ Deleted successfully\n")
+			if config.DryRun {
+				fmt.Printf("➖ DELETE: %s (name: %s) [dry run]\n", serverClass, pool.Name)
+				continue
 			}
+			poolsToDelete = append(poolsToDelete, pendingDeletion{serverClass: serverClass, pool: pool})
 		}
+	}
+
+	if len(poolsToDelete) > 0 {
+		if config.DelayDestroy {
+			fmt.Printf("⏳ Waiting %s before deleting %d outdated node pool(s) to allow replacements to start up...\n", destroyDelayDuration, len(poolsToDelete))
+			time.Sleep(destroyDelayDuration)
+		}
+
+		for _, pending := range poolsToDelete {
+			fmt.Printf("➖ DELETE: %s (name: %s)\n", pending.serverClass, pending.pool.Name)
+			err := spotClient.DeleteSpotNodePool(ctx, config.Org, pending.pool.Name)
+			if err != nil {
+				return fmt.Errorf("deleting node pool %s: %w", pending.pool.Name, err)
+			}
+			fmt.Printf("   ✓ Deleted successfully\n")
+		}
+	} else if config.DelayDestroy && config.DryRun {
+		fmt.Println("No managed node pools to delete. Delay flag was ignored because there were no deletions pending.")
 	}
 
 	fmt.Println()
