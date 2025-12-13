@@ -27,6 +27,7 @@ import (
 type Config struct {
 	Kubeconfig   string
 	Namespaces   []string
+	Regions      []string
 	Categories   []string
 	MaxPrice     float64
 	Output       string
@@ -87,10 +88,12 @@ func buildKubeConfig(kubeconfigPath string) (*rest.Config, error) {
 func main() {
 	var config Config
 	var namespacesFlag string
+	var regionsFlag string
 	var categoriesFlag string
 
 	flag.StringVar(&config.Kubeconfig, "kubeconfig", "", "Path to kubeconfig file (defaults to in-cluster config)")
 	flag.StringVar(&namespacesFlag, "namespace", "", "Filter to specific namespace(s), comma-separated (default: all)")
+	flag.StringVar(&regionsFlag, "regions", "", "Allowed regions, comma-separated (default: all). Example: us-central-ord-1 or ord")
 	flag.StringVar(&categoriesFlag, "categories", "gp,ch,mh", "Allowed instance categories, comma-separated")
 	flag.Float64Var(&config.MaxPrice, "max-price", 0, "Maximum price per node per hour (0 = no limit)")
 	flag.StringVar(&config.Output, "output", "table", "Output format: table or json")
@@ -107,6 +110,9 @@ func main() {
 	// Parse comma-separated values
 	if namespacesFlag != "" {
 		config.Namespaces = strings.Split(namespacesFlag, ",")
+	}
+	if regionsFlag != "" {
+		config.Regions = strings.Split(regionsFlag, ",")
 	}
 	if categoriesFlag != "" {
 		config.Categories = strings.Split(categoriesFlag, ",")
@@ -155,6 +161,7 @@ func run(config Config) error {
 
 	// Set up constraints
 	constraints := scheduler.OptimizationConstraints{
+		Regions:         config.Regions,
 		Categories:      config.Categories,
 		MaxPricePerNode: config.MaxPrice,
 	}
