@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 
@@ -68,6 +69,23 @@ type NodePoolPlan struct {
 	BidPrice    float64
 }
 
+func buildKubeConfig(kubeconfigPath string) (*rest.Config, error) {
+	if kubeconfigPath != "" {
+		if _, err := os.Stat(kubeconfigPath); err == nil {
+			return clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("checking kubeconfig: %w", err)
+		}
+	}
+
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("building in-cluster config: %w", err)
+	}
+
+	return kubeConfig, nil
+}
+
 func main() {
 	var config Config
 	var namespacesFlag string
@@ -112,7 +130,7 @@ func run(config Config) error {
 	ctx := context.Background()
 
 	// Build Kubernetes client
-	kubeConfig, err := clientcmd.BuildConfigFromFlags("", config.Kubeconfig)
+	kubeConfig, err := buildKubeConfig(config.Kubeconfig)
 	if err != nil {
 		return fmt.Errorf("building kubeconfig: %w", err)
 	}
