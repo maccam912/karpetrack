@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 
 	"github.com/google/uuid"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
@@ -91,13 +89,7 @@ func main() {
 	var namespacesFlag string
 	var categoriesFlag string
 
-	// Determine default kubeconfig path
-	defaultKubeconfig := ""
-	if home := homedir.HomeDir(); home != "" {
-		defaultKubeconfig = filepath.Join(home, ".kube", "config")
-	}
-
-	flag.StringVar(&config.Kubeconfig, "kubeconfig", defaultKubeconfig, "Path to kubeconfig file")
+	flag.StringVar(&config.Kubeconfig, "kubeconfig", "", "Path to kubeconfig file (defaults to in-cluster config)")
 	flag.StringVar(&namespacesFlag, "namespace", "", "Filter to specific namespace(s), comma-separated (default: all)")
 	flag.StringVar(&categoriesFlag, "categories", "gp,ch,mh", "Allowed instance categories, comma-separated")
 	flag.Float64Var(&config.MaxPrice, "max-price", 0, "Maximum price per node per hour (0 = no limit)")
