@@ -149,9 +149,15 @@ func (p *PricingProvider) GetInstanceTypes(ctx context.Context) ([]InstanceOptio
 	var options []InstanceOption
 	for regionName, region := range pricing.Regions {
 		for instanceType, serverClass := range region.ServerClasses {
-			price, err := strconv.ParseFloat(serverClass.MarketPrice, 64)
+			marketPrice, err := strconv.ParseFloat(serverClass.MarketPrice, 64)
 			if err != nil {
 				continue // Skip invalid prices
+			}
+
+			// Use the higher of market_price or 50_percentile for more accurate pricing
+			price := marketPrice
+			if serverClass.Percentile50 > price {
+				price = serverClass.Percentile50
 			}
 
 			options = append(options, InstanceOption{
