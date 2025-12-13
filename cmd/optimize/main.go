@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,8 +14,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 
 	"github.com/google/uuid"
 	rxtspot "github.com/rackspace-spot/spot-go-sdk/api/v1"
@@ -36,7 +35,10 @@ type Config struct {
 	Org          string
 	Cloudspace   string
 	DryRun       bool
+	DelayDestroy bool
 }
+
+const destroyDelayDuration = 20 * time.Minute
 
 type OutputResult struct {
 	PodCount          int          `json:"podCount"`
@@ -65,18 +67,29 @@ type NodePoolPlan struct {
 	BidPrice    float64
 }
 
+func buildKubeConfig(kubeconfigPath string) (*rest.Config, error) {
+	if kubeconfigPath != "" {
+		if _, err := os.Stat(kubeconfigPath); err == nil {
+			return clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("checking kubeconfig: %w", err)
+		}
+	}
+
+	kubeConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("building in-cluster config: %w", err)
+	}
+
+	return kubeConfig, nil
+}
+
 func main() {
 	var config Config
 	var namespacesFlag string
 	var categoriesFlag string
 
-	// Determine default kubeconfig path
-	defaultKubeconfig := ""
-	if home := homedir.HomeDir(); home != "" {
-		defaultKubeconfig = filepath.Join(home, ".kube", "config")
-	}
-
-	flag.StringVar(&config.Kubeconfig, "kubeconfig", defaultKubeconfig, "Path to kubeconfig file")
+	flag.StringVar(&config.Kubeconfig, "kubeconfig", "", "Path to kubeconfig file (defaults to in-cluster config)")
 	flag.StringVar(&namespacesFlag, "namespace", "", "Filter to specific namespace(s), comma-separated (default: all)")
 	flag.StringVar(&categoriesFlag, "categories", "gp,ch,mh", "Allowed instance categories, comma-separated")
 	flag.Float64Var(&config.MaxPrice, "max-price", 0, "Maximum price per node per hour (0 = no limit)")
@@ -85,6 +98,7 @@ func main() {
 	// Apply flags
 	flag.BoolVar(&config.Apply, "apply", false, "Apply the optimal configuration by creating/updating node pools")
 	flag.BoolVar(&config.DryRun, "dry-run", false, "Show what would be applied without making changes")
+	flag.BoolVar(&config.DelayDestroy, "delay-destroy", false, "Wait 20 minutes before destroying outdated node pools after creating replacements")
 	flag.StringVar(&config.RefreshToken, "refresh-token", os.Getenv("RACKSPACE_SPOT_REFRESH_TOKEN"), "Rackspace Spot refresh token")
 	flag.StringVar(&config.Org, "org", os.Getenv("RACKSPACE_SPOT_ORG"), "Rackspace Spot organization name")
 	flag.StringVar(&config.Cloudspace, "cloudspace", os.Getenv("RACKSPACE_SPOT_CLOUDSPACE"), "Rackspace Spot cloudspace name")
@@ -108,7 +122,7 @@ func run(config Config) error {
 	ctx := context.Background()
 
 	// Build Kubernetes client
-	kubeConfig, err := clientcmd.BuildConfigFromFlags("", config.Kubeconfig)
+	kubeConfig, err := buildKubeConfig(config.Kubeconfig)
 	if err != nil {
 		return fmt.Errorf("building kubeconfig: %w", err)
 	}
@@ -259,6 +273,11 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 
 	// Track which pools we've handled
 	handledPools := make(map[string]bool)
+	type pendingDeletion struct {
+		serverClass string
+		pool        *rxtspot.SpotNodePool
+	}
+	var poolsToDelete []pendingDeletion
 
 	// Create or update desired pools
 	for serverClass, plan := range desiredPools {
@@ -314,15 +333,30 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 		// Check if this pool is managed by karpetrack via labels
 		isManaged := pool.CustomLabels["karpetrack.io/managed"] == "true"
 		if !handledPools[serverClass] && isManaged {
-			fmt.Printf("➖ DELETE: %s (name: %s)\n", serverClass, pool.Name)
-			if !config.DryRun {
-				err := spotClient.DeleteSpotNodePool(ctx, config.Org, pool.Name)
-				if err != nil {
-					return fmt.Errorf("deleting node pool %s: %w", pool.Name, err)
-				}
-				fmt.Printf("   ✓ Deleted successfully\n")
+			if config.DryRun {
+				fmt.Printf("➖ DELETE: %s (name: %s) [dry run]\n", serverClass, pool.Name)
+				continue
 			}
+			poolsToDelete = append(poolsToDelete, pendingDeletion{serverClass: serverClass, pool: pool})
 		}
+	}
+
+	if len(poolsToDelete) > 0 {
+		if config.DelayDestroy {
+			fmt.Printf("⏳ Waiting %s before deleting %d outdated node pool(s) to allow replacements to start up...\n", destroyDelayDuration, len(poolsToDelete))
+			time.Sleep(destroyDelayDuration)
+		}
+
+		for _, pending := range poolsToDelete {
+			fmt.Printf("➖ DELETE: %s (name: %s)\n", pending.serverClass, pending.pool.Name)
+			err := spotClient.DeleteSpotNodePool(ctx, config.Org, pending.pool.Name)
+			if err != nil {
+				return fmt.Errorf("deleting node pool %s: %w", pending.pool.Name, err)
+			}
+			fmt.Printf("   ✓ Deleted successfully\n")
+		}
+	} else if config.DelayDestroy && config.DryRun {
+		fmt.Println("No managed node pools to delete. Delay flag was ignored because there were no deletions pending.")
 	}
 
 	fmt.Println()

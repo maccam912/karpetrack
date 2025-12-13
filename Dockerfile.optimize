@@ -1,0 +1,11 @@
+FROM golang:1.23-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /karpetrack-optimize ./cmd/optimize
+
+FROM alpine:3.19
+RUN apk --no-cache add ca-certificates
+COPY --from=builder /karpetrack-optimize /usr/local/bin/karpetrack-optimize
+ENTRYPOINT ["/usr/local/bin/karpetrack-optimize"]

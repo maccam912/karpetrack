@@ -297,6 +297,23 @@ make test
 make manifests
 ```
 
+## Optimizer CLI Container
+
+The optimization CLI can run directly from a published container image so you can
+pass the same environment variables and flags as the local binary:
+
+```bash
+docker run --rm \
+  -e RACKSPACE_SPOT_REFRESH_TOKEN=... \
+  -e RACKSPACE_SPOT_ORG=... \
+  -e RACKSPACE_SPOT_CLOUDSPACE=... \
+  ghcr.io/maccam912/karpetrack/optimizer-cli:latest --help
+```
+
+When applying a new instance mix, use `--delay-destroy` to keep existing node
+groups online for 20 minutes after provisioning replacements, reducing the risk
+of downtime while new capacity comes online.
+
 ## License
 
 Apache License 2.0
