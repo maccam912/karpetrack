@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +26,23 @@ import (
 	"github.com/maccam912/karpetrack/internal/scheduler"
 	"github.com/maccam912/karpetrack/internal/spot"
 )
+
+// minBidRegex extracts minimum bid price from API error messages
+var minBidRegex = regexp.MustCompile(`minimum bid price of (\d+\.\d+)`)
+
+// parseMinBidFromError extracts the minimum bid price from a 422 error message.
+func parseMinBidFromError(err error) (float64, bool) {
+	if err == nil {
+		return 0, false
+	}
+	matches := minBidRegex.FindStringSubmatch(err.Error())
+	if len(matches) >= 2 {
+		if price, parseErr := strconv.ParseFloat(matches[1], 64); parseErr == nil {
+			return price, true
+		}
+	}
+	return 0, false
+}
 
 type Config struct {
 	Kubeconfig   string
@@ -340,14 +360,23 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			if existing.Desired != plan.Count {
 				fmt.Printf("📝 UPDATE: %s (desired: %d → %d)\n", serverClass, existing.Desired, plan.Count)
 				if !config.DryRun {
-					err := spotClient.UpdateSpotNodePool(ctx, config.Org, rxtspot.SpotNodePool{
+					pool := rxtspot.SpotNodePool{
 						Name:       existing.Name,
 						Cloudspace: config.Cloudspace,
 						Desired:    plan.Count,
-						BidPrice:   fmt.Sprintf("%.3f", plan.BidPrice),
-					})
+						BidPrice:   fmt.Sprintf("%.6f", plan.BidPrice),
+					}
+					err := spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 					if err != nil {
-						return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
+						// Check if error contains minimum bid price info and retry
+						if minBid, found := parseMinBidFromError(err); found {
+							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
+							pool.BidPrice = fmt.Sprintf("%.6f", minBid)
+							err = spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
+						}
+						if err != nil {
+							return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
+						}
 					}
 					fmt.Printf("   ✓ Updated successfully\n")
 				}
@@ -360,19 +389,28 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			fmt.Printf("➕ CREATE: %s (name: %s, desired: %d, bid: $%.4f)\n",
 				serverClass, poolName, plan.Count, plan.BidPrice)
 			if !config.DryRun {
-				err := spotClient.CreateSpotNodePool(ctx, config.Org, rxtspot.SpotNodePool{
+				pool := rxtspot.SpotNodePool{
 					Name:        poolName,
 					Cloudspace:  config.Cloudspace,
 					ServerClass: serverClass,
 					Desired:     plan.Count,
-					BidPrice:    fmt.Sprintf("%.3f", plan.BidPrice),
+					BidPrice:    fmt.Sprintf("%.6f", plan.BidPrice),
 					CustomLabels: map[string]string{
 						"karpetrack.io/managed":      "true",
 						"karpetrack.io/server-class": sanitizeName(serverClass),
 					},
-				})
+				}
+				err := spotClient.CreateSpotNodePool(ctx, config.Org, pool)
 				if err != nil {
-					return fmt.Errorf("creating node pool %s: %w", poolName, err)
+					// Check if error contains minimum bid price info and retry
+					if minBid, found := parseMinBidFromError(err); found {
+						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
+						pool.BidPrice = fmt.Sprintf("%.6f", minBid)
+						err = spotClient.CreateSpotNodePool(ctx, config.Org, pool)
+					}
+					if err != nil {
+						return fmt.Errorf("creating node pool %s: %w", poolName, err)
+					}
 				}
 				fmt.Printf("   ✓ Created successfully\n")
 			}
@@ -561,8 +599,11 @@ func buildNodePoolPlan(result *scheduler.OptimizationResult) map[string]NodePool
 		existing := plan[node.InstanceType]
 		existing.ServerClass = node.InstanceType
 		existing.Count++
-		// Use the minimum bid price for this instance type
-		existing.BidPrice = getMinBidPrice(node.InstanceType)
+		// Use the price from optimization (max of market, 50th percentile)
+		// Keep the higher price if we've seen this instance type before
+		if node.PricePerHour > existing.BidPrice {
+			existing.BidPrice = node.PricePerHour
+		}
 		plan[node.InstanceType] = existing
 	}
 
@@ -601,7 +642,16 @@ func adjustForDisruptionTolerance(
 		}
 
 		// This pool would be deleted - check if keeping it is worth the cost
-		existingPrice := getMinBidPrice(serverClass)
+		// Use the pool's actual bid price if available, otherwise use static fallback
+		existingPrice := 0.0
+		if existingPool.BidPrice != "" {
+			if parsed, err := strconv.ParseFloat(existingPool.BidPrice, 64); err == nil {
+				existingPrice = parsed
+			}
+		}
+		if existingPrice <= 0 {
+			existingPrice = getMinBidPrice(serverClass)
+		}
 
 		// Find what the optimizer wants to replace this with
 		// We assume the optimizer would place the pods on other nodes in the plan
