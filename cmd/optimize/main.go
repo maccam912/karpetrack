@@ -43,6 +43,8 @@ const destroyDelayDuration = 20 * time.Minute
 
 type OutputResult struct {
 	PodCount          int          `json:"podCount"`
+	RunningPodCount   int          `json:"runningPodCount"`
+	PendingPodCount   int          `json:"pendingPodCount"`
 	NamespaceCount    int          `json:"namespaceCount"`
 	TotalCPUMillis    int64        `json:"totalCpuMillis"`
 	TotalMemoryBytes  int64        `json:"totalMemoryBytes"`
@@ -138,14 +140,14 @@ func run(config Config) error {
 		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
-	// Fetch pods
-	pods, namespaces, err := fetchPods(ctx, clientset, config.Namespaces)
+	// Fetch pods (both running and pending)
+	pods, namespaces, podCounts, err := fetchPods(ctx, clientset, config.Namespaces)
 	if err != nil {
 		return fmt.Errorf("fetching pods: %w", err)
 	}
 
 	if len(pods) == 0 {
-		fmt.Println("No running pods found.")
+		fmt.Println("No running or pending pods found.")
 		return nil
 	}
 
@@ -175,6 +177,8 @@ func run(config Config) error {
 	// Prepare output
 	output := OutputResult{
 		PodCount:          len(pods),
+		RunningPodCount:   podCounts.Running,
+		PendingPodCount:   podCounts.Pending,
 		NamespaceCount:    len(namespaces),
 		TotalCPUMillis:    result.TotalCPU.MilliValue(),
 		TotalMemoryBytes:  result.TotalMemory.Value(),
@@ -231,6 +235,16 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 		return fmt.Errorf("--cloudspace or RACKSPACE_SPOT_CLOUDSPACE is required for apply")
 	}
 
+	// Build Kubernetes client for uncordoning nodes
+	kubeConfig, err := buildKubeConfig(config.Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("building kubeconfig: %w", err)
+	}
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("creating kubernetes client: %w", err)
+	}
+
 	// Create Rackspace Spot client with explicit HTTP client
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
@@ -255,6 +269,36 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 
 	// Get existing node pools
 	existingPools, err := spotClient.ListSpotNodePools(ctx, config.Org, config.Cloudspace)
+	if err != nil {
+		return fmt.Errorf("listing existing node pools: %w", err)
+	}
+
+	// Detect and clean up lost pools first
+	lostPools := detectLostPools(existingPools)
+	if len(lostPools) > 0 {
+		fmt.Println()
+		fmt.Println("═══════════════════════════════════════════════════════════════")
+		fmt.Println("                      LOST POOL CLEANUP")
+		fmt.Println("═══════════════════════════════════════════════════════════════")
+		fmt.Println()
+		for _, pool := range lostPools {
+			fmt.Printf("🔴 LOST POOL: %s (server-class: %s, status: %s)\n",
+				pool.Name, pool.ServerClass, pool.Status)
+			if !config.DryRun {
+				if err := spotClient.DeleteSpotNodePool(ctx, config.Org, pool.Name); err != nil {
+					fmt.Printf("   ⚠ Failed to delete lost pool: %v\n", err)
+				} else {
+					fmt.Printf("   ✓ Deleted successfully\n")
+				}
+			} else {
+				fmt.Printf("   [dry run - would delete]\n")
+			}
+		}
+		fmt.Println()
+	}
+
+	// Refresh the pool list after cleaning up lost pools
+	existingPools, err = spotClient.ListSpotNodePools(ctx, config.Org, config.Cloudspace)
 	if err != nil {
 		return fmt.Errorf("listing existing node pools: %w", err)
 	}
@@ -372,6 +416,82 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 	} else {
 		fmt.Println("Configuration applied successfully!")
 	}
+
+	// After all pool changes are complete, uncordon any cordoned nodes
+	if err := uncordonAllNodes(ctx, clientset, config.DryRun); err != nil {
+		fmt.Printf("⚠ Warning: Failed to uncordon nodes: %v\n", err)
+	}
+
+	return nil
+}
+
+// detectLostPools identifies pools that are in a "lost" or unhealthy state
+func detectLostPools(pools []*rxtspot.SpotNodePool) []*rxtspot.SpotNodePool {
+	var lostPools []*rxtspot.SpotNodePool
+
+	for _, pool := range pools {
+		// Check for pools with "lost" status or similar unhealthy states
+		status := strings.ToLower(pool.Status)
+		if status == "lost" || status == "unhealthy" || status == "failed" || status == "error" {
+			lostPools = append(lostPools, pool)
+			continue
+		}
+
+		// Also consider pools that have been stuck with wonCount=0 but desired > 0
+		// for a significant period (we can't check duration here, but we flag them)
+		// A pool with desired nodes but no won nodes might be orphaned
+		if pool.Desired > 0 && pool.WonCount == 0 && pool.Status == "" {
+			// This could indicate a stuck/lost pool - flag it for review
+			// We'll be more conservative here and only delete explicitly "lost" pools
+			// unless the user wants to be more aggressive
+		}
+	}
+
+	return lostPools
+}
+
+// uncordonAllNodes finds all cordoned nodes and uncordons them
+func uncordonAllNodes(ctx context.Context, clientset *kubernetes.Clientset, dryRun bool) error {
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+
+	var cordonedNodes []corev1.Node
+	for _, node := range nodes.Items {
+		if node.Spec.Unschedulable {
+			cordonedNodes = append(cordonedNodes, node)
+		}
+	}
+
+	if len(cordonedNodes) == 0 {
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Println("                      UNCORDONING NODES")
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Println()
+
+	for _, node := range cordonedNodes {
+		fmt.Printf("🔓 UNCORDON: %s\n", node.Name)
+		if !dryRun {
+			// Create a copy to update
+			nodeCopy := node.DeepCopy()
+			nodeCopy.Spec.Unschedulable = false
+
+			_, err := clientset.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+			if err != nil {
+				fmt.Printf("   ⚠ Failed to uncordon: %v\n", err)
+			} else {
+				fmt.Printf("   ✓ Uncordoned successfully\n")
+			}
+		} else {
+			fmt.Printf("   [dry run - would uncordon]\n")
+		}
+	}
+	fmt.Println()
 
 	return nil
 }
@@ -524,40 +644,73 @@ func sanitizeName(s string) string {
 	return s
 }
 
-func fetchPods(ctx context.Context, clientset *kubernetes.Clientset, namespaces []string) ([]*corev1.Pod, map[string]bool, error) {
+// PodCounts holds counts of pods by status
+type PodCounts struct {
+	Running int
+	Pending int
+}
+
+func fetchPods(ctx context.Context, clientset *kubernetes.Clientset, namespaces []string) ([]*corev1.Pod, map[string]bool, PodCounts, error) {
 	var pods []*corev1.Pod
 	namespaceSet := make(map[string]bool)
+	seenPods := make(map[string]bool) // Prevent duplicates
+	counts := PodCounts{}
+
+	// Fetch both Running and Pending pods to account for all resource requests
+	phases := []string{"Running", "Pending"}
 
 	if len(namespaces) == 0 {
 		// Fetch from all namespaces
-		podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-			FieldSelector: "status.phase=Running",
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		for i := range podList.Items {
-			pod := &podList.Items[i]
-			pods = append(pods, pod)
-			namespaceSet[pod.Namespace] = true
-		}
-	} else {
-		for _, ns := range namespaces {
-			podList, err := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
-				FieldSelector: "status.phase=Running",
+		for _, phase := range phases {
+			podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+				FieldSelector: "status.phase=" + phase,
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, counts, err
 			}
 			for i := range podList.Items {
 				pod := &podList.Items[i]
-				pods = append(pods, pod)
-				namespaceSet[pod.Namespace] = true
+				key := pod.Namespace + "/" + pod.Name
+				if !seenPods[key] {
+					seenPods[key] = true
+					pods = append(pods, pod)
+					namespaceSet[pod.Namespace] = true
+					if phase == "Running" {
+						counts.Running++
+					} else {
+						counts.Pending++
+					}
+				}
+			}
+		}
+	} else {
+		for _, ns := range namespaces {
+			for _, phase := range phases {
+				podList, err := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+					FieldSelector: "status.phase=" + phase,
+				})
+				if err != nil {
+					return nil, nil, counts, err
+				}
+				for i := range podList.Items {
+					pod := &podList.Items[i]
+					key := pod.Namespace + "/" + pod.Name
+					if !seenPods[key] {
+						seenPods[key] = true
+						pods = append(pods, pod)
+						namespaceSet[pod.Namespace] = true
+						if phase == "Running" {
+							counts.Running++
+						} else {
+							counts.Pending++
+						}
+					}
+				}
 			}
 		}
 	}
 
-	return pods, namespaceSet, nil
+	return pods, namespaceSet, counts, nil
 }
 
 func printJSON(output OutputResult) error {
@@ -576,7 +729,8 @@ func printTable(output OutputResult) error {
 	totalCPU := float64(output.TotalCPUMillis) / 1000
 	totalMemGB := float64(output.TotalMemoryBytes) / (1024 * 1024 * 1024)
 
-	fmt.Printf("Analyzed %d pods across %d namespaces\n", output.PodCount, output.NamespaceCount)
+	fmt.Printf("Analyzed %d pods across %d namespaces (%d running, %d pending)\n",
+		output.PodCount, output.NamespaceCount, output.RunningPodCount, output.PendingPodCount)
 	fmt.Printf("Total resource requirements: %.1f CPU, %.1f GB memory\n", totalCPU, totalMemGB)
 	fmt.Println()
 
