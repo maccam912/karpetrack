@@ -238,11 +238,6 @@ func run(config Config) error {
 	return nil
 }
 
-// DisruptionToleranceThreshold is the maximum extra cost (as a ratio) we'll pay to avoid
-// disrupting existing pods. E.g., 0.50 means we'll keep an existing node pool if it costs
-// at most 50% more than the optimal replacement.
-const DisruptionToleranceThreshold = 0.50
-
 func applyConfiguration(ctx context.Context, config Config, result *scheduler.OptimizationResult) error {
 	// Validate required configuration
 	if config.RefreshToken == "" {
@@ -328,9 +323,6 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 	for _, pool := range existingPools {
 		existingByClass[pool.ServerClass] = pool
 	}
-
-	// Check if we should keep existing pools to avoid disruption
-	desiredPools = adjustForDisruptionTolerance(desiredPools, existingByClass, result)
 
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════")
@@ -608,78 +600,6 @@ func buildNodePoolPlan(result *scheduler.OptimizationResult) map[string]NodePool
 	}
 
 	return plan
-}
-
-// adjustForDisruptionTolerance modifies the desired pools to keep existing pools
-// when the cost difference is within the disruption tolerance threshold.
-// This avoids unnecessary pod disruption when the savings are minimal.
-func adjustForDisruptionTolerance(
-	desiredPools map[string]NodePoolPlan,
-	existingByClass map[string]*rxtspot.SpotNodePool,
-	result *scheduler.OptimizationResult,
-) map[string]NodePoolPlan {
-	// Build a map of optimal prices by instance type from the result
-	optimalPrices := make(map[string]float64)
-	optimalCounts := make(map[string]int)
-	for _, node := range result.Nodes {
-		optimalPrices[node.InstanceType] = node.PricePerHour
-		optimalCounts[node.InstanceType]++
-	}
-
-	// Get total optimal cost
-	optimalTotalCost := result.TotalCost
-
-	// Check each existing managed pool that would be deleted
-	for serverClass, existingPool := range existingByClass {
-		// Skip if not managed by karpetrack
-		if existingPool.CustomLabels["karpetrack.io/managed"] != "true" {
-			continue
-		}
-
-		// Skip if the existing pool is already in the desired plan
-		if _, inDesired := desiredPools[serverClass]; inDesired {
-			continue
-		}
-
-		// This pool would be deleted - check if keeping it is worth the cost
-		// Use the pool's actual bid price if available, otherwise use static fallback
-		existingPrice := 0.0
-		if existingPool.BidPrice != "" {
-			if parsed, err := strconv.ParseFloat(existingPool.BidPrice, 64); err == nil {
-				existingPrice = parsed
-			}
-		}
-		if existingPrice <= 0 {
-			existingPrice = getMinBidPrice(serverClass)
-		}
-
-		// Find what the optimizer wants to replace this with
-		// We assume the optimizer would place the pods on other nodes in the plan
-		// Calculate if keeping this existing pool costs less than 50% extra
-		// compared to the marginal cost of the replacement
-
-		// Simple heuristic: if the existing pool's cost is within 50% of the
-		// average node cost in the optimal plan, keep it
-		if len(result.Nodes) > 0 {
-			avgOptimalCost := optimalTotalCost / float64(len(result.Nodes))
-
-			// If existing pool costs at most 50% more than average optimal node, keep it
-			if existingPrice <= avgOptimalCost*(1+DisruptionToleranceThreshold) {
-				fmt.Printf("💡 KEEPING: %s (cost $%.4f/hr) to avoid disruption "+
-					"(within %.0f%% of optimal avg $%.4f/hr)\n",
-					serverClass, existingPrice, DisruptionToleranceThreshold*100, avgOptimalCost)
-
-				// Add this pool back to desired with its current count
-				desiredPools[serverClass] = NodePoolPlan{
-					ServerClass: serverClass,
-					Count:       existingPool.Desired,
-					BidPrice:    existingPrice,
-				}
-			}
-		}
-	}
-
-	return desiredPools
 }
 
 // sanitizeName converts a server class name to a valid Kubernetes name
