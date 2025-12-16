@@ -13,7 +13,9 @@
       "Bash(kubectl describe:*)",
       "WebFetch(domain:ngpc-prod-public-data.s3.us-east-2.amazonaws.com)",
       "Bash(find:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(go doc:*)",
+      "Bash(go list:*)"
     ],
     "deny": [],
     "ask": []

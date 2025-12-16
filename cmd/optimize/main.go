@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -23,6 +25,115 @@ import (
 	"github.com/maccam912/karpetrack/internal/scheduler"
 	"github.com/maccam912/karpetrack/internal/spot"
 )
+
+// SpotNodePoolCreateSpec is the spec for creating a spot node pool with numeric bidPrice.
+// The SDK uses string for BidPrice, but the Rackspace API expects a JSON number.
+type SpotNodePoolCreateSpec struct {
+	ServerClass       string            `json:"serverClass"`
+	Desired           int               `json:"desired"`
+	BidPrice          float64           `json:"bidPrice"`
+	CustomAnnotations map[string]string `json:"customAnnotations,omitempty"`
+	CustomLabels      map[string]string `json:"customLabels,omitempty"`
+	CustomTaints      []interface{}     `json:"customTaints,omitempty"`
+	Autoscaling       struct {
+		Enabled  bool  `json:"enabled"`
+		MinNodes int64 `json:"minNodes"`
+		MaxNodes int64 `json:"maxNodes"`
+	} `json:"autoscaling"`
+}
+
+// SpotNodePoolCreateBody is the request body for creating a spot node pool.
+type SpotNodePoolCreateBody struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
+		Name string `json:"name"`
+	} `json:"metadata"`
+	Spec SpotNodePoolCreateSpec `json:"spec"`
+}
+
+// SpotNodePoolUpdateSpec is the spec for updating a spot node pool with numeric bidPrice.
+type SpotNodePoolUpdateSpec struct {
+	Desired           int               `json:"desired,omitempty"`
+	BidPrice          float64           `json:"bidPrice,omitempty"`
+	CustomAnnotations map[string]string `json:"customAnnotations,omitempty"`
+	CustomLabels      map[string]string `json:"customLabels,omitempty"`
+	CustomTaints      []interface{}     `json:"customTaints,omitempty"`
+	Autoscaling       *struct {
+		Enabled  bool  `json:"enabled"`
+		MinNodes int64 `json:"minNodes"`
+		MaxNodes int64 `json:"maxNodes"`
+	} `json:"autoscaling,omitempty"`
+}
+
+// SpotNodePoolUpdateBody is the request body for updating a spot node pool.
+type SpotNodePoolUpdateBody struct {
+	Spec SpotNodePoolUpdateSpec `json:"spec"`
+}
+
+// createSpotNodePoolRaw creates a spot node pool using raw HTTP with numeric bidPrice.
+func createSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotClient, org, cloudspace string, pool SpotNodePoolCreateBody) error {
+	pool.APIVersion = "ngpc.rxt.io/v1"
+	pool.Kind = "SpotNodePool"
+	pool.Spec.Autoscaling.Enabled = false
+
+	body, err := json.Marshal(pool)
+	if err != nil {
+		return fmt.Errorf("marshaling request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/orgs/%s/cloudspaces/%s/spotnodepools", client.BaseURL, org, cloudspace)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+client.Token)
+
+	resp, err := client.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// updateSpotNodePoolRaw updates a spot node pool using raw HTTP with numeric bidPrice.
+func updateSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotClient, org, poolName string, spec SpotNodePoolUpdateSpec) error {
+	body, err := json.Marshal(SpotNodePoolUpdateBody{Spec: spec})
+	if err != nil {
+		return fmt.Errorf("marshaling request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/orgs/%s/spotnodepools/%s", client.BaseURL, org, poolName)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	req.Header.Set("Authorization", "Bearer "+client.Token)
+
+	resp, err := client.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("sending request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
 
 type Config struct {
 	Kubeconfig   string
@@ -296,11 +407,10 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			if existing.Desired != plan.Count {
 				fmt.Printf("📝 UPDATE: %s (desired: %d → %d)\n", serverClass, existing.Desired, plan.Count)
 				if !config.DryRun {
-					err := spotClient.UpdateSpotNodePool(ctx, config.Org, rxtspot.SpotNodePool{
-						Name:       existing.Name,
-						Cloudspace: config.Cloudspace,
-						Desired:    plan.Count,
-						BidPrice:   fmt.Sprintf("%.3f", plan.BidPrice),
+					// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
+					err := updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, SpotNodePoolUpdateSpec{
+						Desired:  plan.Count,
+						BidPrice: plan.BidPrice,
 					})
 					if err != nil {
 						return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
@@ -316,17 +426,19 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			fmt.Printf("➕ CREATE: %s (name: %s, desired: %d, bid: $%.4f)\n",
 				serverClass, poolName, plan.Count, plan.BidPrice)
 			if !config.DryRun {
-				err := spotClient.CreateSpotNodePool(ctx, config.Org, rxtspot.SpotNodePool{
-					Name:        poolName,
-					Cloudspace:  config.Cloudspace,
+				// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
+				createBody := SpotNodePoolCreateBody{}
+				createBody.Metadata.Name = poolName
+				createBody.Spec = SpotNodePoolCreateSpec{
 					ServerClass: serverClass,
 					Desired:     plan.Count,
-					BidPrice:    fmt.Sprintf("%.3f", plan.BidPrice),
+					BidPrice:    plan.BidPrice,
 					CustomLabels: map[string]string{
 						"karpetrack.io/managed":      "true",
 						"karpetrack.io/server-class": sanitizeName(serverClass),
 					},
-				})
+				}
+				err := createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
 				if err != nil {
 					return fmt.Errorf("creating node pool %s: %w", poolName, err)
 				}
