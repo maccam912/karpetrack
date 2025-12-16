@@ -384,7 +384,7 @@ func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverCla
 		Cloudspace:  c.cloudspaceID,
 		ServerClass: serverClass,
 		Desired:     desired,
-		BidPrice:    fmt.Sprintf("%.6f", initialBid),
+		BidPrice:    fmt.Sprintf("%.3f", initialBid),
 		CustomLabels: map[string]string{
 			"karpetrack.io/managed":      "true",
 			"karpetrack.io/server-class": sanitizeLabel(serverClass),
@@ -402,7 +402,7 @@ func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverCla
 			"serverClass", serverClass,
 			"initialBid", initialBid,
 			"requiredMinBid", minBid)
-		pool.BidPrice = fmt.Sprintf("%.6f", minBid)
+		pool.BidPrice = fmt.Sprintf("%.3f", minBid)
 		return c.sdk.CreateSpotNodePool(ctx, c.org, pool)
 	}
 
@@ -416,7 +416,7 @@ func (c *Client) tryUpdatePoolWithRetry(ctx context.Context, poolName string, de
 		Name:       poolName,
 		Cloudspace: c.cloudspaceID,
 		Desired:    desired,
-		BidPrice:   fmt.Sprintf("%.6f", initialBid),
+		BidPrice:   fmt.Sprintf("%.3f", initialBid),
 	}
 
 	err := c.sdk.UpdateSpotNodePool(ctx, c.org, pool)
@@ -430,7 +430,7 @@ func (c *Client) tryUpdatePoolWithRetry(ctx context.Context, poolName string, de
 			"poolName", poolName,
 			"initialBid", initialBid,
 			"requiredMinBid", minBid)
-		pool.BidPrice = fmt.Sprintf("%.6f", minBid)
+		pool.BidPrice = fmt.Sprintf("%.3f", minBid)
 		return c.sdk.UpdateSpotNodePool(ctx, c.org, pool)
 	}
 

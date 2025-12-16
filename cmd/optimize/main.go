@@ -364,14 +364,14 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 						Name:       existing.Name,
 						Cloudspace: config.Cloudspace,
 						Desired:    plan.Count,
-						BidPrice:   fmt.Sprintf("%.6f", plan.BidPrice),
+						BidPrice:   fmt.Sprintf("%.3f", plan.BidPrice),
 					}
 					err := spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 					if err != nil {
 						// Check if error contains minimum bid price info and retry
 						if minBid, found := parseMinBidFromError(err); found {
 							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
-							pool.BidPrice = fmt.Sprintf("%.6f", minBid)
+							pool.BidPrice = fmt.Sprintf("%.3f", minBid)
 							err = spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 						}
 						if err != nil {
@@ -394,7 +394,7 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 					Cloudspace:  config.Cloudspace,
 					ServerClass: serverClass,
 					Desired:     plan.Count,
-					BidPrice:    fmt.Sprintf("%.6f", plan.BidPrice),
+					BidPrice:    fmt.Sprintf("%.3f", plan.BidPrice),
 					CustomLabels: map[string]string{
 						"karpetrack.io/managed":      "true",
 						"karpetrack.io/server-class": sanitizeName(serverClass),
@@ -405,7 +405,7 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 					// Check if error contains minimum bid price info and retry
 					if minBid, found := parseMinBidFromError(err); found {
 						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
-						pool.BidPrice = fmt.Sprintf("%.6f", minBid)
+						pool.BidPrice = fmt.Sprintf("%.3f", minBid)
 						err = spotClient.CreateSpotNodePool(ctx, config.Org, pool)
 					}
 					if err != nil {
