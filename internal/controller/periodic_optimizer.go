@@ -267,7 +267,7 @@ func (r *PeriodicOptimizerController) optimizeNodePool(
 					CPU:    &nodeRec.CPU,
 					Memory: &nodeRec.Memory,
 				},
-				BidPrice: fmt.Sprintf("%.6f", nodeRec.PricePerHour*1.1),
+				BidPrice: fmt.Sprintf("%.3f", nodeRec.PricePerHour*1.1),
 			},
 		}
 
