@@ -426,6 +426,30 @@ func TestFitPodsToNode_WithOverhead(t *testing.T) {
 
 // Utilization tests
 
+func TestBinPacker_StorageConstraint(t *testing.T) {
+	bp := NewBinPacker()
+
+	// Node: 4 CPU, 8Gi, 40Gi Storage
+	nodeType := makeNodeCapWithStorage("region-1", "medium", 4, 8, 40, 0.02)
+
+	// Pod: 1 CPU, 2Gi, 50Gi Storage (Exceeds node storage)
+	pod := makePodReqsWithStorage("large-storage-pod", 1000, 2048, 50)
+
+	fitting := bp.fitPodsToNode([]PodRequirements{pod}, nodeType)
+
+	if len(fitting) != 0 {
+		t.Errorf("Expected pod to NOT fit due to storage constraint, but it did")
+	}
+
+	// Pod: 1 CPU, 2Gi, 30Gi Storage (Fits)
+	pod2 := makePodReqsWithStorage("small-storage-pod", 1000, 2048, 30)
+	fitting2 := bp.fitPodsToNode([]PodRequirements{pod2}, nodeType)
+
+	if len(fitting2) != 1 {
+		t.Errorf("Expected pod to fit, but it didn't")
+	}
+}
+
 func TestNodeCapacity_Utilization(t *testing.T) {
 	node := makeNodeCapWithStorage("region-1", "medium", 8, 16, 40, 0.02)
 
