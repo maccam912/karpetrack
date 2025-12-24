@@ -51,6 +51,10 @@ type Resources struct {
 	// Memory is the maximum total memory
 	// +optional
 	Memory *resource.Quantity `json:"memory,omitempty"`
+
+	// EphemeralStorage is the maximum total ephemeral storage
+	// +optional
+	EphemeralStorage *resource.Quantity `json:"ephemeralStorage,omitempty"`
 }
 
 // DisruptionSpec defines disruption behavior

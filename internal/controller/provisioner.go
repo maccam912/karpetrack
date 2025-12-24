@@ -233,14 +233,14 @@ func (r *ProvisionerController) canProvisionMore(
 	nodePool *karpetrackv1alpha1.SpotNodePool,
 ) bool {
 	// Check resource limits
-	if nodePool.Spec.Limits.CPU != nil || nodePool.Spec.Limits.Memory != nil {
+	if nodePool.Spec.Limits.CPU != nil || nodePool.Spec.Limits.Memory != nil || nodePool.Spec.Limits.EphemeralStorage != nil {
 		// Get current SpotNodes for this pool
 		var spotNodes karpetrackv1alpha1.SpotNodeList
 		if err := r.List(ctx, &spotNodes); err != nil {
 			return false
 		}
 
-		var currentCPU, currentMem resource.Quantity
+		var currentCPU, currentMem, currentStorage resource.Quantity
 		for _, sn := range spotNodes.Items {
 			if sn.Spec.NodePoolRef == nodePool.Name {
 				if sn.Spec.Resources.CPU != nil {
@@ -249,6 +249,9 @@ func (r *ProvisionerController) canProvisionMore(
 				if sn.Spec.Resources.Memory != nil {
 					currentMem.Add(*sn.Spec.Resources.Memory)
 				}
+				if sn.Spec.Resources.EphemeralStorage != nil {
+					currentStorage.Add(*sn.Spec.Resources.EphemeralStorage)
+				}
 			}
 		}
 
@@ -256,6 +259,9 @@ func (r *ProvisionerController) canProvisionMore(
 			return false
 		}
 		if nodePool.Spec.Limits.Memory != nil && currentMem.Cmp(*nodePool.Spec.Limits.Memory) >= 0 {
+			return false
+		}
+		if nodePool.Spec.Limits.EphemeralStorage != nil && currentStorage.Cmp(*nodePool.Spec.Limits.EphemeralStorage) >= 0 {
 			return false
 		}
 	}
@@ -315,8 +321,9 @@ func (r *ProvisionerController) provisionNodesForPods(
 				InstanceType: nodeRec.InstanceType,
 				Region:       nodeRec.Region,
 				Resources: karpetrackv1alpha1.SpotNodeResources{
-					CPU:    &nodeRec.CPU,
-					Memory: &nodeRec.Memory,
+					CPU:              &nodeRec.CPU,
+					Memory:           &nodeRec.Memory,
+					EphemeralStorage: &nodeRec.Storage,
 				},
 				BidPrice: fmt.Sprintf("%.6f", nodeRec.PricePerHour*1.1), // Bid 10% above market
 			},
@@ -356,7 +363,7 @@ func (r *ProvisionerController) updateNodePoolStatus(
 	}
 
 	var count int32
-	var totalCPU, totalMem resource.Quantity
+	var totalCPU, totalMem, totalStorage resource.Quantity
 	for _, sn := range spotNodes.Items {
 		if sn.Spec.NodePoolRef == nodePool.Name {
 			count++
@@ -366,6 +373,9 @@ func (r *ProvisionerController) updateNodePoolStatus(
 			if sn.Spec.Resources.Memory != nil {
 				totalMem.Add(*sn.Spec.Resources.Memory)
 			}
+			if sn.Spec.Resources.EphemeralStorage != nil {
+				totalStorage.Add(*sn.Spec.Resources.EphemeralStorage)
+			}
 		}
 	}
 
@@ -373,6 +383,7 @@ func (r *ProvisionerController) updateNodePoolStatus(
 	nodePool.Status.NodeCount = count
 	nodePool.Status.Resources.CPU = &totalCPU
 	nodePool.Status.Resources.Memory = &totalMem
+	nodePool.Status.Resources.EphemeralStorage = &totalStorage
 
 	return r.Status().Patch(ctx, nodePool, patch)
 }

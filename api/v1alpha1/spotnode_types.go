@@ -58,6 +58,10 @@ type SpotNodeResources struct {
 	// +optional
 	Memory *resource.Quantity `json:"memory,omitempty"`
 
+	// EphemeralStorage
+	// +optional
+	EphemeralStorage *resource.Quantity `json:"ephemeralStorage,omitempty"`
+
 	// GPU count (if applicable)
 	// +optional
 	GPU *resource.Quantity `json:"gpu,omitempty"`
