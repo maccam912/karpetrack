@@ -15,6 +15,7 @@ type PodRequirements struct {
 	CPU       resource.Quantity
 	Memory    resource.Quantity
 	GPU       resource.Quantity
+	EphemeralStorage resource.Quantity
 
 	// Scheduling constraints
 	NodeSelector map[string]string
@@ -40,6 +41,10 @@ func GetPodRequirements(pod *corev1.Pod) PodRequirements {
 		if mem := container.Resources.Requests.Memory(); mem != nil {
 			reqs.Memory.Add(*mem)
 		}
+		// Ephemeral storage
+		if storage := container.Resources.Requests.StorageEphemeral(); storage != nil {
+			reqs.EphemeralStorage.Add(*storage)
+		}
 		// Check for GPU requests
 		if gpu, ok := container.Resources.Requests["nvidia.com/gpu"]; ok {
 			reqs.GPU.Add(gpu)
@@ -54,6 +59,9 @@ func GetPodRequirements(pod *corev1.Pod) PodRequirements {
 		if mem := container.Resources.Requests.Memory(); mem != nil && mem.Cmp(reqs.Memory) > 0 {
 			reqs.Memory = *mem
 		}
+		if storage := container.Resources.Requests.StorageEphemeral(); storage != nil && storage.Cmp(reqs.EphemeralStorage) > 0 {
+			reqs.EphemeralStorage = *storage
+		}
 	}
 
 	return reqs
@@ -64,6 +72,7 @@ type AggregateRequirements struct {
 	TotalCPU    resource.Quantity
 	TotalMemory resource.Quantity
 	TotalGPU    resource.Quantity
+	TotalStorage resource.Quantity
 	PodCount    int
 	Pods        []PodRequirements
 }
@@ -80,6 +89,7 @@ func AggregatePodRequirements(pods []*corev1.Pod) AggregateRequirements {
 		agg.TotalCPU.Add(reqs.CPU)
 		agg.TotalMemory.Add(reqs.Memory)
 		agg.TotalGPU.Add(reqs.GPU)
+		agg.TotalStorage.Add(reqs.EphemeralStorage)
 		agg.PodCount++
 	}
 
@@ -88,13 +98,14 @@ func AggregatePodRequirements(pods []*corev1.Pod) AggregateRequirements {
 
 // NodeCapacity represents the capacity of a node type
 type NodeCapacity struct {
-	Region       string
-	InstanceType string
-	Category     string
-	CPU          resource.Quantity
-	Memory       resource.Quantity
-	GPU          resource.Quantity
-	PricePerHour float64
+	Region           string
+	InstanceType     string
+	Category         string
+	CPU              resource.Quantity
+	Memory           resource.Quantity
+	GPU              resource.Quantity
+	EphemeralStorage resource.Quantity
+	PricePerHour     float64
 }
 
 // CanFit checks if a pod's requirements can fit on this node type
@@ -103,6 +114,9 @@ func (nc NodeCapacity) CanFit(reqs PodRequirements) bool {
 		return false
 	}
 	if nc.Memory.Cmp(reqs.Memory) < 0 {
+		return false
+	}
+	if nc.EphemeralStorage.Cmp(reqs.EphemeralStorage) < 0 {
 		return false
 	}
 	if !reqs.GPU.IsZero() && nc.GPU.Cmp(reqs.GPU) < 0 {
@@ -114,18 +128,21 @@ func (nc NodeCapacity) CanFit(reqs PodRequirements) bool {
 // CanFitMultiple checks how many pods of given requirements can fit
 func (nc NodeCapacity) CanFitMultiple(pods []PodRequirements) int {
 	remaining := NodeCapacity{
-		CPU:    nc.CPU.DeepCopy(),
-		Memory: nc.Memory.DeepCopy(),
-		GPU:    nc.GPU.DeepCopy(),
+		CPU:              nc.CPU.DeepCopy(),
+		Memory:           nc.Memory.DeepCopy(),
+		GPU:              nc.GPU.DeepCopy(),
+		EphemeralStorage: nc.EphemeralStorage.DeepCopy(),
 	}
 
 	count := 0
 	for _, pod := range pods {
 		if remaining.CPU.Cmp(pod.CPU) >= 0 &&
 			remaining.Memory.Cmp(pod.Memory) >= 0 &&
+			remaining.EphemeralStorage.Cmp(pod.EphemeralStorage) >= 0 &&
 			(pod.GPU.IsZero() || remaining.GPU.Cmp(pod.GPU) >= 0) {
 			remaining.CPU.Sub(pod.CPU)
 			remaining.Memory.Sub(pod.Memory)
+			remaining.EphemeralStorage.Sub(pod.EphemeralStorage)
 			if !pod.GPU.IsZero() {
 				remaining.GPU.Sub(pod.GPU)
 			}
@@ -138,15 +155,21 @@ func (nc NodeCapacity) CanFitMultiple(pods []PodRequirements) int {
 
 // Utilization calculates the utilization ratio after fitting pods
 func (nc NodeCapacity) Utilization(pods []PodRequirements) float64 {
-	var usedCPU, usedMem resource.Quantity
+	var usedCPU, usedMem, usedStorage resource.Quantity
 	for _, pod := range pods {
 		usedCPU.Add(pod.CPU)
 		usedMem.Add(pod.Memory)
+		usedStorage.Add(pod.EphemeralStorage)
 	}
 
 	cpuUtil := float64(usedCPU.MilliValue()) / float64(nc.CPU.MilliValue())
 	memUtil := float64(usedMem.Value()) / float64(nc.Memory.Value())
 
-	// Return average utilization
-	return (cpuUtil + memUtil) / 2
+	if nc.EphemeralStorage.IsZero() {
+		return (cpuUtil + memUtil) / 2
+	}
+
+	storageUtil := float64(usedStorage.Value()) / float64(nc.EphemeralStorage.Value())
+	return (cpuUtil + memUtil + storageUtil) / 3
 }
+
