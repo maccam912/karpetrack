@@ -5,6 +5,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// DefaultEphemeralStorage is the fallback storage capacity for nodes (40GB)
+const DefaultEphemeralStorage = "40Gi"
+
 // PodRequirements represents the resource requirements for a pod
 type PodRequirements struct {
 	Name      string
