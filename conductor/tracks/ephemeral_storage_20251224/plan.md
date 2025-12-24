@@ -1,10 +1,10 @@
 # Track Plan: Ephemeral Storage Awareness
 
-## Phase 1: Research & Definition
+## Phase 1: Research & Definition [checkpoint: 316f37f]
 - [x] Task: Analyze current resource extraction logic in `binpacker.go` and `requirements.go`. 18742ab
 - [x] Task: Investigate Rackspace Spot SDK/API capabilities regarding disk size reporting. 359364b
 - [x] Task: Define the "Default Storage Capacity" constant (40GB) in a central configuration or constants file. ac4797c
-- [~] Task: Conductor - User Manual Verification 'Research & Definition' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Research & Definition' (Protocol in workflow.md) 316f37f
 
 ## Phase 2: Implementation - Resource Modeling
 - [ ] Task: Update internal node representation to include `EphemeralStorage` in available resources.
