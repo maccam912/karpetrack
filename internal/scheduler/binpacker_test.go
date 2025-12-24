@@ -18,21 +18,42 @@ func makePodReqs(name string, cpuMillis int64, memMi int64) PodRequirements {
 	}
 }
 
+func makePodReqsWithStorage(name string, cpuMillis int64, memMi int64, storageGi int64) PodRequirements {
+	reqs := makePodReqs(name, cpuMillis, memMi)
+	reqs.EphemeralStorage = *resource.NewQuantity(storageGi*1024*1024*1024, resource.BinarySI)
+	return reqs
+}
+
 func makeNodeCap(region, instanceType string, cpu int, memGi int, price float64) NodeCapacity {
 	return NodeCapacity{
-		Region:       region,
-		InstanceType: instanceType,
-		Category:     "General Purpose",
-		CPU:          resource.MustParse(fmt.Sprintf("%d", cpu)),
-		Memory:       resource.MustParse(fmt.Sprintf("%dGi", memGi)),
-		PricePerHour: price,
+		Region:           region,
+		InstanceType:     instanceType,
+		CPU:              *resource.NewQuantity(int64(cpu), resource.DecimalSI),
+		Memory:           *resource.NewQuantity(int64(memGi)*1024*1024*1024, resource.BinarySI),
+		EphemeralStorage: *resource.NewQuantity(40*1024*1024*1024, resource.BinarySI), // Default 40GB
+		PricePerHour:     price,
 	}
 }
+
+func makeNodeCapWithStorage(region, instanceType string, cpu int, memGi int, storageGi int, price float64) NodeCapacity {
+	nc := makeNodeCap(region, instanceType, cpu, memGi, price)
+	nc.EphemeralStorage = *resource.NewQuantity(int64(storageGi)*1024*1024*1024, resource.BinarySI)
+	return nc
+}
+
 
 func makeDaemonSetOverhead(cpuMillis int64, memMi int64) *DaemonSetOverhead {
 	return &DaemonSetOverhead{
 		CPU:    *resource.NewMilliQuantity(cpuMillis, resource.DecimalSI),
 		Memory: *resource.NewQuantity(memMi*1024*1024, resource.BinarySI),
+	}
+}
+
+func makeDaemonSetOverheadWithStorage(cpuMillis int64, memMi int64, storageGi int64) *DaemonSetOverhead {
+	return &DaemonSetOverhead{
+		CPU:              *resource.NewMilliQuantity(cpuMillis, resource.DecimalSI),
+		Memory:           *resource.NewQuantity(memMi*1024*1024, resource.BinarySI),
+		EphemeralStorage: *resource.NewQuantity(storageGi*1024*1024*1024, resource.BinarySI),
 	}
 }
 
@@ -406,7 +427,7 @@ func TestFitPodsToNode_WithOverhead(t *testing.T) {
 // Utilization tests
 
 func TestNodeCapacity_Utilization(t *testing.T) {
-	node := makeNodeCap("region-1", "medium", 8, 16, 0.02)
+	node := makeNodeCapWithStorage("region-1", "medium", 8, 16, 40, 0.02)
 
 	tests := []struct {
 		name         string
@@ -421,14 +442,14 @@ func TestNodeCapacity_Utilization(t *testing.T) {
 		{
 			name: "half utilization",
 			pods: []PodRequirements{
-				makePodReqs("pod-1", 4000, 8*1024), // 4 CPU, 8Gi = 50%
+				makePodReqsWithStorage("pod-1", 4000, 8*1024, 20), // 4 CPU, 8Gi, 20Gi = 50%
 			},
 			expectedUtil: 0.5,
 		},
 		{
 			name: "full utilization",
 			pods: []PodRequirements{
-				makePodReqs("pod-1", 8000, 16*1024), // 8 CPU, 16Gi = 100%
+				makePodReqsWithStorage("pod-1", 8000, 16*1024, 40), // 8 CPU, 16Gi, 40Gi = 100%
 			},
 			expectedUtil: 1.0,
 		},

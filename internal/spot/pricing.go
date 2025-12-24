@@ -160,15 +160,22 @@ func (p *PricingProvider) GetInstanceTypes(ctx context.Context) ([]InstanceOptio
 				price = serverClass.Percentile50
 			}
 
+			// Use fallback for storage if not present in API data
+			storage := int(serverClass.Storage)
+			if storage <= 0 {
+				storage = DefaultEphemeralStorageGB
+			}
+
 			options = append(options, InstanceOption{
-				Region:       regionName,
-				InstanceType: instanceType,
-				DisplayName:  serverClass.DisplayName,
-				Category:     serverClass.Category,
-				CPU:          int(serverClass.CPU),
-				MemoryGB:     int(serverClass.Memory),
-				PricePerHour: price,
-				Generation:   region.Generation,
+				Region:           regionName,
+				InstanceType:     instanceType,
+				DisplayName:      serverClass.DisplayName,
+				Category:         serverClass.Category,
+				CPU:              int(serverClass.CPU),
+				MemoryGB:         int(serverClass.Memory),
+				EphemeralStorage: storage,
+				PricePerHour:     price,
+				Generation:       region.Generation,
 			})
 		}
 	}

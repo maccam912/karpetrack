@@ -47,10 +47,11 @@ type OptimizationConstraints struct {
 
 // OptimizationResult contains the recommended node configuration
 type OptimizationResult struct {
-	Nodes       []NodeRecommendation
-	TotalCost   float64
-	TotalCPU    resource.Quantity
-	TotalMemory resource.Quantity
+	Nodes        []NodeRecommendation
+	TotalCost    float64
+	TotalCPU     resource.Quantity
+	TotalMemory  resource.Quantity
+	TotalStorage resource.Quantity
 }
 
 // NodeRecommendation represents a single node to provision
@@ -60,6 +61,7 @@ type NodeRecommendation struct {
 	Category     string
 	CPU          resource.Quantity
 	Memory       resource.Quantity
+	Storage      resource.Quantity
 	PricePerHour float64
 	PodCount     int
 	Pods         []string // Pod names assigned to this node
@@ -103,7 +105,8 @@ func (co *CostOptimizer) FindOptimalConfiguration(
 		binPacker = NewBinPackerWithOverhead(constraints.DaemonSetOverhead)
 		slog.Info("Using daemonset overhead in bin packing",
 			"cpu", constraints.DaemonSetOverhead.CPU.String(),
-			"memory", constraints.DaemonSetOverhead.Memory.String())
+			"memory", constraints.DaemonSetOverhead.Memory.String(),
+			"storage", constraints.DaemonSetOverhead.EphemeralStorage.String())
 	}
 
 	// Run bin packing to find optimal configuration
@@ -129,6 +132,7 @@ func (co *CostOptimizer) FindOptimalConfiguration(
 			Category:     pr.Node.Category,
 			CPU:          pr.Node.CPU,
 			Memory:       pr.Node.Memory,
+			Storage:      pr.Node.EphemeralStorage,
 			PricePerHour: pr.Node.PricePerHour,
 			PodCount:     len(pr.AssignedPods),
 			Pods:         podNames,
@@ -138,6 +142,7 @@ func (co *CostOptimizer) FindOptimalConfiguration(
 		result.TotalCost += pr.Node.PricePerHour
 		result.TotalCPU.Add(pr.Node.CPU)
 		result.TotalMemory.Add(pr.Node.Memory)
+		result.TotalStorage.Add(pr.Node.EphemeralStorage)
 	}
 
 	// Validate against max total cost constraint
@@ -168,12 +173,13 @@ func (co *CostOptimizer) getAvailableNodeTypes(
 	nodeTypes := make([]NodeCapacity, 0, len(options))
 	for _, opt := range options {
 		nodeTypes = append(nodeTypes, NodeCapacity{
-			Region:       opt.Region,
-			InstanceType: opt.InstanceType,
-			Category:     opt.Category,
-			CPU:          resource.MustParse(fmt.Sprintf("%d", opt.CPU)),
-			Memory:       resource.MustParse(fmt.Sprintf("%dGi", opt.MemoryGB)),
-			PricePerHour: opt.PricePerHour,
+			Region:           opt.Region,
+			InstanceType:     opt.InstanceType,
+			Category:         opt.Category,
+			CPU:              resource.MustParse(fmt.Sprintf("%d", opt.CPU)),
+			Memory:           resource.MustParse(fmt.Sprintf("%dGi", opt.MemoryGB)),
+			EphemeralStorage: resource.MustParse(fmt.Sprintf("%dGi", opt.EphemeralStorage)),
+			PricePerHour:     opt.PricePerHour,
 		})
 	}
 

@@ -8,6 +8,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// DefaultEphemeralStorageGB is the fallback storage capacity for nodes (40GB)
+const DefaultEphemeralStorageGB = 40
+
 // FlexInt is an int that can be unmarshalled from either a string or int JSON value
 type FlexInt int
 
@@ -60,7 +63,8 @@ type ServerClass struct {
 	Category     string  `json:"category"`
 	Description  string  `json:"description"`
 	CPU          FlexInt `json:"cpu"`
-	Memory       FlexInt `json:"memory"` // in GB
+	Memory       FlexInt `json:"memory"`             // in GB
+	Storage      FlexInt `json:"storage,omitempty"`   // in GB
 	MarketPrice  string  `json:"market_price"`
 	Percentile20 float64 `json:"20_percentile"`
 	Percentile50 float64 `json:"50_percentile"`
@@ -69,14 +73,15 @@ type ServerClass struct {
 
 // InstanceOption represents a potential instance to provision
 type InstanceOption struct {
-	Region       string
-	InstanceType string
-	DisplayName  string
-	Category     string
-	CPU          int
-	MemoryGB     int
-	PricePerHour float64
-	Generation   string
+	Region           string
+	InstanceType     string
+	DisplayName      string
+	Category         string
+	CPU              int
+	MemoryGB         int
+	EphemeralStorage int
+	PricePerHour     float64
+	Generation       string
 }
 
 // NodeSpec defines parameters for creating a new node

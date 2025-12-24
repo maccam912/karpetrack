@@ -13,8 +13,9 @@ import (
 // When bin packing pods, this overhead should be subtracted from each node's available
 // capacity to ensure regular pods don't oversubscribe nodes.
 type DaemonSetOverhead struct {
-	CPU    resource.Quantity
-	Memory resource.Quantity
+	CPU              resource.Quantity
+	Memory           resource.Quantity
+	EphemeralStorage resource.Quantity
 }
 
 // Add adds another overhead to this one
@@ -24,11 +25,12 @@ func (o *DaemonSetOverhead) Add(other *DaemonSetOverhead) {
 	}
 	o.CPU.Add(other.CPU)
 	o.Memory.Add(other.Memory)
+	o.EphemeralStorage.Add(other.EphemeralStorage)
 }
 
 // IsZero returns true if both CPU and Memory overhead are zero
 func (o *DaemonSetOverhead) IsZero() bool {
-	return o == nil || (o.CPU.IsZero() && o.Memory.IsZero())
+	return o == nil || (o.CPU.IsZero() && o.Memory.IsZero() && o.EphemeralStorage.IsZero())
 }
 
 // String returns a human-readable representation of the overhead
@@ -36,7 +38,8 @@ func (o *DaemonSetOverhead) String() string {
 	if o == nil {
 		return "DaemonSetOverhead{nil}"
 	}
-	return fmt.Sprintf("DaemonSetOverhead{CPU: %s, Memory: %s}", o.CPU.String(), o.Memory.String())
+	return fmt.Sprintf("DaemonSetOverhead{CPU: %s, Memory: %s, Storage: %s}",
+		o.CPU.String(), o.Memory.String(), o.EphemeralStorage.String())
 }
 
 // GetDaemonSetOverhead queries the cluster for all DaemonSets and calculates
@@ -89,19 +92,25 @@ func getDaemonSetPodOverhead(ds *appsv1.DaemonSet) *DaemonSetOverhead {
 		if mem := container.Resources.Requests.Memory(); mem != nil {
 			overhead.Memory.Add(*mem)
 		}
+		if storage := container.Resources.Requests.StorageEphemeral(); storage != nil {
+			overhead.EphemeralStorage.Add(*storage)
+		}
 	}
 
 	// For init containers, take the max (they run sequentially before main containers)
 	// Unlike regular pods where init containers can require more resources than the
 	// final running state, for DaemonSets we assume steady-state resource usage
 	// which is determined by the regular containers
-	var maxInitCPU, maxInitMem resource.Quantity
+	var maxInitCPU, maxInitMem, maxInitStorage resource.Quantity
 	for _, container := range ds.Spec.Template.Spec.InitContainers {
 		if cpu := container.Resources.Requests.Cpu(); cpu != nil && cpu.Cmp(maxInitCPU) > 0 {
 			maxInitCPU = *cpu
 		}
 		if mem := container.Resources.Requests.Memory(); mem != nil && mem.Cmp(maxInitMem) > 0 {
 			maxInitMem = *mem
+		}
+		if storage := container.Resources.Requests.StorageEphemeral(); storage != nil && storage.Cmp(maxInitStorage) > 0 {
+			maxInitStorage = *storage
 		}
 	}
 
@@ -112,6 +121,9 @@ func getDaemonSetPodOverhead(ds *appsv1.DaemonSet) *DaemonSetOverhead {
 	}
 	if maxInitMem.Cmp(overhead.Memory) > 0 {
 		overhead.Memory = maxInitMem
+	}
+	if maxInitStorage.Cmp(overhead.EphemeralStorage) > 0 {
+		overhead.EphemeralStorage = maxInitStorage
 	}
 
 	return overhead
@@ -126,6 +138,7 @@ func GetDaemonSetOverheadFromPods(pods []PodRequirements) *DaemonSetOverhead {
 	for _, pod := range pods {
 		overhead.CPU.Add(pod.CPU)
 		overhead.Memory.Add(pod.Memory)
+		overhead.EphemeralStorage.Add(pod.EphemeralStorage)
 	}
 
 	return overhead
@@ -136,6 +149,15 @@ func NewDaemonSetOverhead(cpu, memory resource.Quantity) *DaemonSetOverhead {
 	return &DaemonSetOverhead{
 		CPU:    cpu,
 		Memory: memory,
+	}
+}
+
+// NewDaemonSetOverheadWithStorage creates a DaemonSetOverhead with the specified CPU, memory and storage
+func NewDaemonSetOverheadWithStorage(cpu, memory, storage resource.Quantity) *DaemonSetOverhead {
+	return &DaemonSetOverhead{
+		CPU:              cpu,
+		Memory:           memory,
+		EphemeralStorage: storage,
 	}
 }
 

@@ -183,21 +183,25 @@ func (bp *BinPacker) packBestFit(pods []PodRequirements, nodeTypes []NodeCapacit
 // packSingleLargeNode tries to fit all pods on one large node
 func (bp *BinPacker) packSingleLargeNode(pods []PodRequirements, nodeTypes []NodeCapacity) []PackingResult {
 	// Calculate total requirements
-	var totalCPU, totalMem resource.Quantity
+	var totalCPU, totalMem, totalStorage resource.Quantity
 	for _, pod := range pods {
 		totalCPU.Add(pod.CPU)
 		totalMem.Add(pod.Memory)
+		totalStorage.Add(pod.EphemeralStorage)
 	}
 
 	// Add DaemonSet overhead to required capacity
 	if bp.DaemonSetOverhead != nil {
 		totalCPU.Add(bp.DaemonSetOverhead.CPU)
 		totalMem.Add(bp.DaemonSetOverhead.Memory)
+		totalStorage.Add(bp.DaemonSetOverhead.EphemeralStorage)
 	}
 
 	// Find smallest node that fits all pods (including overhead)
 	for _, nodeType := range nodeTypes {
-		if nodeType.CPU.Cmp(totalCPU) >= 0 && nodeType.Memory.Cmp(totalMem) >= 0 {
+		if nodeType.CPU.Cmp(totalCPU) >= 0 &&
+			nodeType.Memory.Cmp(totalMem) >= 0 &&
+			nodeType.EphemeralStorage.Cmp(totalStorage) >= 0 {
 			return []PackingResult{{
 				Node:         nodeType,
 				AssignedPods: pods,
@@ -237,18 +241,20 @@ func (bp *BinPacker) findBestNodeForPods(pods []PodRequirements, nodeTypes []Nod
 // fitPodsToNode returns as many pods as can fit on the given node type
 func (bp *BinPacker) fitPodsToNode(pods []PodRequirements, node NodeCapacity) []PodRequirements {
 	remaining := NodeCapacity{
-		CPU:    node.CPU.DeepCopy(),
-		Memory: node.Memory.DeepCopy(),
-		GPU:    node.GPU.DeepCopy(),
+		CPU:              node.CPU.DeepCopy(),
+		Memory:           node.Memory.DeepCopy(),
+		GPU:              node.GPU.DeepCopy(),
+		EphemeralStorage: node.EphemeralStorage.DeepCopy(),
 	}
 
 	// Subtract DaemonSet overhead from available capacity first
 	if bp.DaemonSetOverhead != nil {
 		remaining.CPU.Sub(bp.DaemonSetOverhead.CPU)
 		remaining.Memory.Sub(bp.DaemonSetOverhead.Memory)
+		remaining.EphemeralStorage.Sub(bp.DaemonSetOverhead.EphemeralStorage)
 
 		// If overhead exceeds node capacity, no pods can fit
-		if remaining.CPU.Sign() < 0 || remaining.Memory.Sign() < 0 {
+		if remaining.CPU.Sign() < 0 || remaining.Memory.Sign() < 0 || remaining.EphemeralStorage.Sign() < 0 {
 			return nil
 		}
 	}
@@ -257,10 +263,12 @@ func (bp *BinPacker) fitPodsToNode(pods []PodRequirements, node NodeCapacity) []
 	for _, pod := range pods {
 		if remaining.CPU.Cmp(pod.CPU) >= 0 &&
 			remaining.Memory.Cmp(pod.Memory) >= 0 &&
+			remaining.EphemeralStorage.Cmp(pod.EphemeralStorage) >= 0 &&
 			(pod.GPU.IsZero() || remaining.GPU.Cmp(pod.GPU) >= 0) {
 			fitting = append(fitting, pod)
 			remaining.CPU.Sub(pod.CPU)
 			remaining.Memory.Sub(pod.Memory)
+			remaining.EphemeralStorage.Sub(pod.EphemeralStorage)
 			if !pod.GPU.IsZero() {
 				remaining.GPU.Sub(pod.GPU)
 			}
