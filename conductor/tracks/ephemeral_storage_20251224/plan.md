@@ -16,11 +16,11 @@
 - [x] Task: Conductor - User Manual Verification 'Implementation - Resource Modeling' (Protocol in workflow.md) fd6fdf4
 
 ## Phase 3: Implementation - Binpacking Logic
-- [ ] Task: Update `Binpacker` to enforce storage constraints.
-    - [ ] Sub-task: Write Tests: Create scenarios where CPU/RAM fit but Storage fails.
-    - [ ] Sub-task: Implement Feature: Add `storage` check to the `Fit` function in `binpacker.go`.
-- [ ] Task: Update `Provisioner` to use the new binpacking logic for new node creation.
-    - [ ] Sub-task: Write Tests: Verify a new node is provisioned when existing nodes lack storage.
+- [x] Task: Update `Binpacker` to enforce storage constraints. 553c379
+    - [x] Sub-task: Write Tests: Create scenarios where CPU/RAM fit but Storage fails. 553c379
+    - [x] Sub-task: Implement Feature: Add `storage` check to the `Fit` function in `binpacker.go`. 553c379
+- [~] Task: Update `Provisioner` to use the new binpacking logic for new node creation.
+    - [~] Sub-task: Write Tests: Verify a new node is provisioned when existing nodes lack storage.
     - [ ] Sub-task: Implement Feature: Ensure provisioner respects the hard constraint.
 - [ ] Task: Conductor - User Manual Verification 'Implementation - Binpacking Logic' (Protocol in workflow.md)
 
