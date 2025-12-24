@@ -5,16 +5,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// DefaultEphemeralStorage is the fallback storage capacity for nodes (40GB)
-const DefaultEphemeralStorage = "40Gi"
-
 // PodRequirements represents the resource requirements for a pod
 type PodRequirements struct {
-	Name      string
-	Namespace string
-	CPU       resource.Quantity
-	Memory    resource.Quantity
-	GPU       resource.Quantity
+	Name             string
+	Namespace        string
+	CPU              resource.Quantity
+	Memory           resource.Quantity
+	GPU              resource.Quantity
 	EphemeralStorage resource.Quantity
 
 	// Scheduling constraints
@@ -69,12 +66,12 @@ func GetPodRequirements(pod *corev1.Pod) PodRequirements {
 
 // AggregateRequirements combines requirements from multiple pods
 type AggregateRequirements struct {
-	TotalCPU    resource.Quantity
-	TotalMemory resource.Quantity
-	TotalGPU    resource.Quantity
+	TotalCPU     resource.Quantity
+	TotalMemory  resource.Quantity
+	TotalGPU     resource.Quantity
 	TotalStorage resource.Quantity
-	PodCount    int
-	Pods        []PodRequirements
+	PodCount     int
+	Pods         []PodRequirements
 }
 
 // AggregatePodRequirements combines requirements from multiple pods

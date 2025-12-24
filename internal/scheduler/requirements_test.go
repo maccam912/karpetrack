@@ -1,15 +1,18 @@
 package scheduler
 
 import (
+	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/maccam912/karpetrack/internal/spot"
 )
 
 func TestDefaultEphemeralStorage(t *testing.T) {
 	expected := resource.MustParse("40Gi")
-	actual := resource.MustParse(DefaultEphemeralStorage)
+	actual := resource.MustParse(fmt.Sprintf("%dGi", spot.DefaultEphemeralStorageGB))
 
 	if !expected.Equal(actual) {
 		t.Errorf("Expected DefaultEphemeralStorage to be %v, got %v", expected, actual)
