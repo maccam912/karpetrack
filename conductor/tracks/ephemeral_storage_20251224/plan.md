@@ -7,11 +7,11 @@
 - [x] Task: Conductor - User Manual Verification 'Research & Definition' (Protocol in workflow.md) 316f37f
 
 ## Phase 2: Implementation - Resource Modeling
-- [ ] Task: Update internal node representation to include `EphemeralStorage` in available resources.
-    - [ ] Sub-task: Write Tests: Verify storage resource parsing from Pod specs.
-    - [ ] Sub-task: Implement Feature: Add storage extraction to `requirements.go` or equivalent.
-- [ ] Task: Implement storage capacity lookup for instance types.
-    - [ ] Sub-task: Write Tests: Mock API responses and verify fallback to 40GB.
+- [x] Task: Update internal node representation to include `EphemeralStorage` in available resources. 76b3f71
+    - [x] Sub-task: Write Tests: Verify storage resource parsing from Pod specs. 76b3f71
+    - [x] Sub-task: Implement Feature: Add storage extraction to `requirements.go` or equivalent. 76b3f71
+- [~] Task: Implement storage capacity lookup for instance types.
+    - [~] Sub-task: Write Tests: Mock API responses and verify fallback to 40GB.
     - [ ] Sub-task: Implement Feature: Add logic to fetch or default storage size for candidate instance types.
 - [ ] Task: Conductor - User Manual Verification 'Implementation - Resource Modeling' (Protocol in workflow.md)
 
