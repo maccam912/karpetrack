@@ -12,6 +12,7 @@ A Kubernetes controller for managing Rackspace Spot instances with automatic cos
 - **Cost Efficiency:** Maintain optimal cluster sizing and instance selection to minimize spend without manual intervention.
 
 ## Core Features
+- **Ephemeral Storage Awareness:** Automatically accounts for `ephemeral-storage` requests when binpacking and provisioning nodes, ensuring workloads with large disk requirements are scheduled correctly.
 - **Complex Scheduling Support:** Full support for Kubernetes scheduling constraints including Taints, Tolerations, and Node/Pod Affinities to ensure workloads land on the right spot instances.
 - **Automatic Node Provisioning:** Dynamic response to unschedulable pods by provisioning the most cost-effective spot instances that meet workload requirements.
 - **Cost Optimization:** Continuous background monitoring of spot prices with automated replacement of nodes when cheaper alternatives become available.
