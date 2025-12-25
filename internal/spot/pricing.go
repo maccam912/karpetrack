@@ -279,6 +279,46 @@ func (p *PricingProvider) GetPriceForServerClass(ctx context.Context, serverClas
 	return p.GetPriceForInstance(ctx, region, baseType)
 }
 
+// GetBidPriceForServerClass returns the recommended bid price for a server class.
+// Returns max(market_price, 50th_percentile) to ensure bids are competitive.
+// Server class format: category.generation.size-region (e.g., "gp.vs1.medium-dfw")
+func (p *PricingProvider) GetBidPriceForServerClass(ctx context.Context, serverClass string) (float64, error) {
+	// Parse server class to extract region and base instance type
+	lastDash := strings.LastIndex(serverClass, "-")
+	if lastDash == -1 {
+		return 0, fmt.Errorf("invalid server class format: %s", serverClass)
+	}
+
+	baseType := serverClass[:lastDash] // e.g., "gp.vs1.medium"
+	region := serverClass[lastDash+1:] // e.g., "dfw"
+
+	pricing, err := p.GetPricing(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	regionData, ok := pricing.Regions[region]
+	if !ok {
+		return 0, fmt.Errorf("region not found: %s", region)
+	}
+
+	sc, ok := regionData.ServerClasses[baseType]
+	if !ok {
+		return 0, fmt.Errorf("instance type not found: %s in region %s", baseType, region)
+	}
+
+	marketPrice, err := strconv.ParseFloat(sc.MarketPrice, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing market price: %w", err)
+	}
+
+	// Return max(market_price, 50th_percentile)
+	if sc.Percentile50 > marketPrice {
+		return sc.Percentile50, nil
+	}
+	return marketPrice, nil
+}
+
 // FindCheaperAlternative finds a cheaper instance that can replace the given one
 func (p *PricingProvider) FindCheaperAlternative(
 	ctx context.Context,

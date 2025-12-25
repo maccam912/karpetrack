@@ -216,7 +216,7 @@ func (r *OptimizerController) replaceNode(
 			InstanceType: alternative.InstanceType,
 			Region:       alternative.Region,
 			Resources:    oldNode.Spec.Resources, // Keep same resource requirements
-			BidPrice:     fmt.Sprintf("%.6f", alternative.PricePerHour*1.1),
+			BidPrice:     fmt.Sprintf("%.3f", alternative.PricePerHour*1.1),
 		},
 	}
 

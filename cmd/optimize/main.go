@@ -7,9 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -135,6 +138,23 @@ func updateSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotCli
 	return nil
 }
 
+// minBidRegex extracts minimum bid price from API error messages
+var minBidRegex = regexp.MustCompile(`minimum bid price of (\d+\.\d+)`)
+
+// parseMinBidFromError extracts the minimum bid price from a 422 error message.
+func parseMinBidFromError(err error) (float64, bool) {
+	if err == nil {
+		return 0, false
+	}
+	matches := minBidRegex.FindStringSubmatch(err.Error())
+	if len(matches) >= 2 {
+		if price, parseErr := strconv.ParseFloat(matches[1], 64); parseErr == nil {
+			return price, true
+		}
+	}
+	return 0, false
+}
+
 type Config struct {
 	Kubeconfig   string
 	Namespaces   []string
@@ -154,6 +174,8 @@ const destroyDelayDuration = 20 * time.Minute
 
 type OutputResult struct {
 	PodCount          int          `json:"podCount"`
+	RunningPodCount   int          `json:"runningPodCount"`
+	PendingPodCount   int          `json:"pendingPodCount"`
 	NamespaceCount    int          `json:"namespaceCount"`
 	TotalCPUMillis    int64        `json:"totalCpuMillis"`
 	TotalMemoryBytes  int64        `json:"totalMemoryBytes"`
@@ -249,19 +271,21 @@ func run(config Config) error {
 		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
-	// Fetch pods
-	pods, namespaces, err := fetchPods(ctx, clientset, config.Namespaces)
+	// Fetch pods (both running and pending)
+
+pods, namespaces, podCounts, err := fetchPods(ctx, clientset, config.Namespaces)
 	if err != nil {
 		return fmt.Errorf("fetching pods: %w", err)
 	}
 
 	if len(pods) == 0 {
-		fmt.Println("No running pods found.")
+		fmt.Println("No running or pending pods found.")
 		return nil
 	}
 
 	// Extract requirements from pods
-	podReqs := make([]scheduler.PodRequirements, 0, len(pods))
+
+podReqs := make([]scheduler.PodRequirements, 0, len(pods))
 	for _, pod := range pods {
 		podReqs = append(podReqs, scheduler.GetPodRequirements(pod))
 	}
@@ -286,6 +310,8 @@ func run(config Config) error {
 	// Prepare output
 	output := OutputResult{
 		PodCount:          len(pods),
+		RunningPodCount:   podCounts.Running,
+		PendingPodCount:   podCounts.Pending,
 		NamespaceCount:    len(namespaces),
 		TotalCPUMillis:    result.TotalCPU.MilliValue(),
 		TotalMemoryBytes:  result.TotalMemory.Value(),
@@ -325,11 +351,6 @@ func run(config Config) error {
 	return nil
 }
 
-// DisruptionToleranceThreshold is the maximum extra cost (as a ratio) we'll pay to avoid
-// disrupting existing pods. E.g., 0.50 means we'll keep an existing node pool if it costs
-// at most 50% more than the optimal replacement.
-const DisruptionToleranceThreshold = 0.50
-
 func applyConfiguration(ctx context.Context, config Config, result *scheduler.OptimizationResult) error {
 	// Validate required configuration
 	if config.RefreshToken == "" {
@@ -340,6 +361,16 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 	}
 	if config.Cloudspace == "" {
 		return fmt.Errorf("--cloudspace or RACKSPACE_SPOT_CLOUDSPACE is required for apply")
+	}
+
+	// Build Kubernetes client for uncordoning nodes
+	kubeConfig, err := buildKubeConfig(config.Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("building kubeconfig: %w", err)
+	}
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
 	// Create Rackspace Spot client with explicit HTTP client
@@ -370,14 +401,42 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 		return fmt.Errorf("listing existing node pools: %w", err)
 	}
 
+	// Detect and clean up lost pools first
+
+lostPools := detectLostPools(existingPools)
+	if len(lostPools) > 0 {
+		fmt.Println()
+		fmt.Println("═══════════════════════════════════════════════════════════════")
+		fmt.Println("                      LOST POOL CLEANUP")
+		fmt.Println("═══════════════════════════════════════════════════════════════")
+		fmt.Println()
+		for _, pool := range lostPools {
+			fmt.Printf("🔴 LOST POOL: %s (server-class: %s, status: %s)\n",
+				pool.Name, pool.ServerClass, pool.Status)
+			if !config.DryRun {
+				if err := spotClient.DeleteSpotNodePool(ctx, config.Org, pool.Name); err != nil {
+					fmt.Printf("   ⚠ Failed to delete lost pool: %v\n", err)
+				} else {
+					fmt.Printf("   ✓ Deleted successfully\n")
+				}
+			} else {
+				fmt.Printf("   [dry run - would delete]\n")
+			}
+		}
+		fmt.Println()
+	}
+
+	// Refresh the pool list after cleaning up lost pools
+	existingPools, err = spotClient.ListSpotNodePools(ctx, config.Org, config.Cloudspace)
+	if err != nil {
+		return fmt.Errorf("listing existing node pools: %w", err)
+	}
+
 	// Build a map of existing pools by server class
 	existingByClass := make(map[string]*rxtspot.SpotNodePool)
 	for _, pool := range existingPools {
 		existingByClass[pool.ServerClass] = pool
 	}
-
-	// Check if we should keep existing pools to avoid disruption
-	desiredPools = adjustForDisruptionTolerance(desiredPools, existingByClass, result)
 
 	fmt.Println()
 	fmt.Println("═══════════════════════════════════════════════════════════════")
@@ -408,12 +467,21 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 				fmt.Printf("📝 UPDATE: %s (desired: %d → %d)\n", serverClass, existing.Desired, plan.Count)
 				if !config.DryRun {
 					// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-					err := updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, SpotNodePoolUpdateSpec{
+					updateSpec := SpotNodePoolUpdateSpec{
 						Desired:  plan.Count,
 						BidPrice: plan.BidPrice,
-					})
+					}
+					err := updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
 					if err != nil {
-						return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
+						// Check if error contains minimum bid price info and retry
+						if minBid, found := parseMinBidFromError(err); found {
+							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
+							updateSpec.BidPrice = minBid
+							err = updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
+						}
+							if err != nil {
+							return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
+						}
 					}
 					fmt.Printf("   ✓ Updated successfully\n")
 				}
@@ -440,7 +508,15 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 				}
 				err := createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
 				if err != nil {
-					return fmt.Errorf("creating node pool %s: %w", poolName, err)
+					// Check if error contains minimum bid price info and retry
+					if minBid, found := parseMinBidFromError(err); found {
+						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
+						createBody.Spec.BidPrice = minBid
+						err = createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
+					}
+						if err != nil {
+						return fmt.Errorf("creating node pool %s: %w", poolName, err)
+					}
 				}
 				fmt.Printf("   ✓ Created successfully\n")
 			}
@@ -484,6 +560,82 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 	} else {
 		fmt.Println("Configuration applied successfully!")
 	}
+
+	// After all pool changes are complete, uncordon any cordoned nodes
+	if err := uncordonAllNodes(ctx, clientset, config.DryRun); err != nil {
+		fmt.Printf("⚠ Warning: Failed to uncordon nodes: %v\n", err)
+	}
+
+	return nil
+}
+
+// detectLostPools identifies pools that are in a "lost" or unhealthy state
+func detectLostPools(pools []*rxtspot.SpotNodePool) []*rxtspot.SpotNodePool {
+	var lostPools []*rxtspot.SpotNodePool
+
+	for _, pool := range pools {
+		// Check for pools with "lost" status or similar unhealthy states
+		status := strings.ToLower(pool.Status)
+		if status == "lost" || status == "unhealthy" || status == "failed" || status == "error" {
+			lostPools = append(lostPools, pool)
+			continue
+		}
+
+		// Also consider pools that have been stuck with wonCount=0 but desired > 0
+		// for a significant period (we can't check duration here, but we flag them)
+		// A pool with desired nodes but no won nodes might be orphaned
+		if pool.Desired > 0 && pool.WonCount == 0 && pool.Status == "" {
+			// This could indicate a stuck/lost pool - flag it for review
+			// We'll be more conservative here and only delete explicitly "lost" pools
+			// unless the user wants to be more aggressive
+		}
+	}
+
+	return lostPools
+}
+
+// uncordonAllNodes finds all cordoned nodes and uncordons them
+func uncordonAllNodes(ctx context.Context, clientset *kubernetes.Clientset, dryRun bool) error {
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+
+	var cordonedNodes []corev1.Node
+	for _, node := range nodes.Items {
+		if node.Spec.Unschedulable {
+			cordonedNodes = append(cordonedNodes, node)
+		}
+	}
+
+	if len(cordonedNodes) == 0 {
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Println("                      UNCORDONING NODES")
+	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Println()
+
+	for _, node := range cordonedNodes {
+		fmt.Printf("🔓 UNCORDON: %s\n", node.Name)
+		if !dryRun {
+			// Create a copy to update
+			nodeCopy := node.DeepCopy()
+			nodeCopy.Spec.Unschedulable = false
+
+			_, err := clientset.CoreV1().Nodes().Update(ctx, nodeCopy, metav1.UpdateOptions{})
+			if err != nil {
+				fmt.Printf("   ⚠ Failed to uncordon: %v\n", err)
+			} else {
+				fmt.Printf("   ✓ Uncordoned successfully\n")
+			}
+		} else {
+			fmt.Printf("   [dry run - would uncordon]\n")
+		}
+	}
+	fmt.Println()
 
 	return nil
 }
@@ -553,75 +705,15 @@ func buildNodePoolPlan(result *scheduler.OptimizationResult) map[string]NodePool
 		existing := plan[node.InstanceType]
 		existing.ServerClass = node.InstanceType
 		existing.Count++
-		// Use the minimum bid price for this instance type
-		existing.BidPrice = getMinBidPrice(node.InstanceType)
+		// Use the price from optimization (max of market, 50th percentile)
+		// Keep the higher price if we've seen this instance type before
+		if node.PricePerHour > existing.BidPrice {
+			existing.BidPrice = node.PricePerHour
+		}
 		plan[node.InstanceType] = existing
 	}
 
 	return plan
-}
-
-// adjustForDisruptionTolerance modifies the desired pools to keep existing pools
-// when the cost difference is within the disruption tolerance threshold.
-// This avoids unnecessary pod disruption when the savings are minimal.
-func adjustForDisruptionTolerance(
-	desiredPools map[string]NodePoolPlan,
-	existingByClass map[string]*rxtspot.SpotNodePool,
-	result *scheduler.OptimizationResult,
-) map[string]NodePoolPlan {
-	// Build a map of optimal prices by instance type from the result
-	optimalPrices := make(map[string]float64)
-	optimalCounts := make(map[string]int)
-	for _, node := range result.Nodes {
-		optimalPrices[node.InstanceType] = node.PricePerHour
-		optimalCounts[node.InstanceType]++
-	}
-
-	// Get total optimal cost
-	optimalTotalCost := result.TotalCost
-
-	// Check each existing managed pool that would be deleted
-	for serverClass, existingPool := range existingByClass {
-		// Skip if not managed by karpetrack
-		if existingPool.CustomLabels["karpetrack.io/managed"] != "true" {
-			continue
-		}
-
-		// Skip if the existing pool is already in the desired plan
-		if _, inDesired := desiredPools[serverClass]; inDesired {
-			continue
-		}
-
-		// This pool would be deleted - check if keeping it is worth the cost
-		existingPrice := getMinBidPrice(serverClass)
-
-		// Find what the optimizer wants to replace this with
-		// We assume the optimizer would place the pods on other nodes in the plan
-		// Calculate if keeping this existing pool costs less than 50% extra
-		// compared to the marginal cost of the replacement
-
-		// Simple heuristic: if the existing pool's cost is within 50% of the
-		// average node cost in the optimal plan, keep it
-		if len(result.Nodes) > 0 {
-			avgOptimalCost := optimalTotalCost / float64(len(result.Nodes))
-
-			// If existing pool costs at most 50% more than average optimal node, keep it
-			if existingPrice <= avgOptimalCost*(1+DisruptionToleranceThreshold) {
-				fmt.Printf("💡 KEEPING: %s (cost $%.4f/hr) to avoid disruption "+
-					"(within %.0f%% of optimal avg $%.4f/hr)\n",
-					serverClass, existingPrice, DisruptionToleranceThreshold*100, avgOptimalCost)
-
-				// Add this pool back to desired with its current count
-				desiredPools[serverClass] = NodePoolPlan{
-					ServerClass: serverClass,
-					Count:       existingPool.Desired,
-					BidPrice:    existingPrice,
-				}
-			}
-		}
-	}
-
-	return desiredPools
 }
 
 // sanitizeName converts a server class name to a valid Kubernetes name
@@ -636,40 +728,73 @@ func sanitizeName(s string) string {
 	return s
 }
 
-func fetchPods(ctx context.Context, clientset *kubernetes.Clientset, namespaces []string) ([]*corev1.Pod, map[string]bool, error) {
+// PodCounts holds counts of pods by status
+type PodCounts struct {
+	Running int
+	Pending int
+}
+
+func fetchPods(ctx context.Context, clientset *kubernetes.Clientset, namespaces []string) ([]*corev1.Pod, map[string]bool, PodCounts, error) {
 	var pods []*corev1.Pod
 	namespaceSet := make(map[string]bool)
+	seenPods := make(map[string]bool) // Prevent duplicates
+	counts := PodCounts{}
+
+	// Fetch both Running and Pending pods to account for all resource requests
+	phases := []string{"Running", "Pending"}
 
 	if len(namespaces) == 0 {
 		// Fetch from all namespaces
-		podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-			FieldSelector: "status.phase=Running",
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		for i := range podList.Items {
-			pod := &podList.Items[i]
-			pods = append(pods, pod)
-			namespaceSet[pod.Namespace] = true
-		}
-	} else {
-		for _, ns := range namespaces {
-			podList, err := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
-				FieldSelector: "status.phase=Running",
+		for _, phase := range phases {
+			podList, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+				FieldSelector: "status.phase=" + phase,
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, counts, err
 			}
 			for i := range podList.Items {
 				pod := &podList.Items[i]
-				pods = append(pods, pod)
-				namespaceSet[pod.Namespace] = true
+				key := pod.Namespace + "/" + pod.Name
+				if !seenPods[key] {
+					seenPods[key] = true
+					pods = append(pods, pod)
+					namespaceSet[pod.Namespace] = true
+					if phase == "Running" {
+						counts.Running++
+					} else {
+						counts.Pending++
+					}
+				}
+			}
+		}
+	} else {
+		for _, ns := range namespaces {
+			for _, phase := range phases {
+				podList, err := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+					FieldSelector: "status.phase=" + phase,
+				})
+				if err != nil {
+					return nil, nil, counts, err
+				}
+				for i := range podList.Items {
+					pod := &podList.Items[i]
+					key := pod.Namespace + "/" + pod.Name
+					if !seenPods[key] {
+						seenPods[key] = true
+						pods = append(pods, pod)
+						namespaceSet[pod.Namespace] = true
+						if phase == "Running" {
+							counts.Running++
+						} else {
+							counts.Pending++
+						}
+					}
+				}
 			}
 		}
 	}
 
-	return pods, namespaceSet, nil
+	return pods, namespaceSet, counts, nil
 }
 
 func printJSON(output OutputResult) error {
@@ -688,7 +813,8 @@ func printTable(output OutputResult) error {
 	totalCPU := float64(output.TotalCPUMillis) / 1000
 	totalMemGB := float64(output.TotalMemoryBytes) / (1024 * 1024 * 1024)
 
-	fmt.Printf("Analyzed %d pods across %d namespaces\n", output.PodCount, output.NamespaceCount)
+	fmt.Printf("Analyzed %d pods across %d namespaces (%d running, %d pending)\n",
+		output.PodCount, output.NamespaceCount, output.RunningPodCount, output.PendingPodCount)
 	fmt.Printf("Total resource requirements: %.1f CPU, %.1f GB memory\n", totalCPU, totalMemGB)
 	fmt.Println()
 

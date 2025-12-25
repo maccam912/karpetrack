@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +136,25 @@ func parseBidPrice(s string) float64 {
 	return price
 }
 
+// minBidRegex extracts minimum bid price from API error messages
+// Example: "BidPrice must be greater than or equal to the minimum bid price of 0.040000, but got 0.010000"
+var minBidRegex = regexp.MustCompile(`minimum bid price of (\d+\.\d+)`)
+
+// parseMinBidFromError extracts the minimum bid price from a 422 error message.
+// Returns the parsed price and true if found, or 0 and false if not found.
+func parseMinBidFromError(err error) (float64, bool) {
+	if err == nil {
+		return 0, false
+	}
+	matches := minBidRegex.FindStringSubmatch(err.Error())
+	if len(matches) >= 2 {
+		if price, parseErr := strconv.ParseFloat(matches[1], 64); parseErr == nil {
+			return price, true
+		}
+	}
+	return 0, false
+}
+
 // Client wraps the Rackspace Spot SDK for node management
 type Client struct {
 	refreshToken string
@@ -232,16 +254,15 @@ func (c *Client) CreateNode(ctx context.Context, spec NodeSpec) (*Node, error) {
 	// Server class in Rackspace is the instance type (e.g., "gp.vs1.medium-dfw")
 	serverClass := spec.InstanceType
 
-	// Determine bid price - use live market price, not stale static prices
+	// Determine initial bid price - use max(market_price, 50th_percentile)
 	bidPrice := spec.BidPrice
 	if bidPrice <= 0 {
-		// Try to get live market price from pricing API
-		// Server class format includes region: "gp.vs1.medium-dfw"
-		if marketPrice, err := c.pricing.GetPriceForServerClass(ctx, serverClass); err == nil && marketPrice > 0 {
-			bidPrice = marketPrice * 1.1 // 10% above live market price
+		// Try to get bid price from pricing API (max of market, 50th percentile)
+		if price, err := c.pricing.GetBidPriceForServerClass(ctx, serverClass); err == nil && price > 0 {
+			bidPrice = price
 		} else {
 			// Fallback to static min bid prices only if API fails
-			bidPrice = GetMinBidPrice(serverClass) * 1.1
+			bidPrice = GetMinBidPrice(serverClass)
 		}
 	}
 
@@ -264,30 +285,14 @@ func (c *Client) CreateNode(ctx context.Context, spec NodeSpec) (*Node, error) {
 	if targetPool != nil {
 		// Update existing pool - increment desired count
 		poolName = targetPool.Name
-		// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-		err := updateSpotNodePoolRaw(ctx, c.sdk, c.org, targetPool.Name, spotNodePoolUpdateSpec{
-			Desired:  targetPool.Desired + 1,
-			BidPrice: bidPrice,
-		})
+		err := c.tryUpdatePoolWithRetry(ctx, targetPool.Name, targetPool.Desired+1, bidPrice)
 		if err != nil {
 			return nil, fmt.Errorf("updating node pool %s: %w", targetPool.Name, err)
 		}
 	} else {
 		// Create new pool with desired=1
 		poolName = generatePoolName(serverClass)
-		// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-		createBody := spotNodePoolCreateBody{}
-		createBody.Metadata.Name = poolName
-		createBody.Spec = spotNodePoolCreateSpec{
-			ServerClass: serverClass,
-			Desired:     1,
-			BidPrice:    bidPrice,
-			CustomLabels: map[string]string{
-				"karpetrack.io/managed":      "true",
-				"karpetrack.io/server-class": sanitizeLabel(serverClass),
-			},
-		}
-		err := createSpotNodePoolRaw(ctx, c.sdk, c.org, c.cloudspaceID, createBody)
+		err := c.tryCreatePoolWithRetry(ctx, poolName, serverClass, 1, bidPrice)
 		if err != nil {
 			return nil, fmt.Errorf("creating node pool: %w", err)
 		}
@@ -432,11 +437,7 @@ func (c *Client) UpdateNodePool(ctx context.Context, poolID string, spec NodePoo
 	c.sdkMu.Lock()
 	defer c.sdkMu.Unlock()
 
-	// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-	return updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolID, spotNodePoolUpdateSpec{
-		Desired:  spec.DesiredCount,
-		BidPrice: spec.BidPrice,
-	})
+	return c.tryUpdatePoolWithRetry(ctx, poolID, spec.DesiredCount, spec.BidPrice)
 }
 
 // ScaleNodePool scales a node pool to the desired count
@@ -468,11 +469,7 @@ func (c *Client) ScaleNodePool(ctx context.Context, poolID string, desiredCount 
 
 	bidPrice := parseBidPrice(bidPriceStr)
 
-	// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-	return updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolID, spotNodePoolUpdateSpec{
-		Desired:  desiredCount,
-		BidPrice: bidPrice,
-	})
+	return c.tryUpdatePoolWithRetry(ctx, poolID, desiredCount, bidPrice)
 }
 
 // ListManagedPools returns all pools managed by karpetrack
@@ -497,6 +494,67 @@ func (c *Client) ListManagedPools(ctx context.Context) ([]*rxtspot.SpotNodePool,
 	}
 
 	return managed, nil
+}
+
+// --- Retry helpers for bid price validation ---
+
+// tryCreatePoolWithRetry attempts to create a pool, and if the API rejects the bid price
+// with a 422 error containing the actual minimum, retries with the discovered minimum.
+func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverClass string, desired int, initialBid float64) error {
+	createBody := spotNodePoolCreateBody{}
+	createBody.Metadata.Name = poolName
+	createBody.Spec = spotNodePoolCreateSpec{
+		ServerClass: serverClass,
+		Desired:     desired,
+		BidPrice:    initialBid,
+		CustomLabels: map[string]string{
+			"karpetrack.io/managed":      "true",
+			"karpetrack.io/server-class": sanitizeLabel(serverClass),
+		},
+	}
+
+	err := createSpotNodePoolRaw(ctx, c.sdk, c.org, c.cloudspaceID, createBody)
+	if err == nil {
+		return nil
+	}
+
+	// Check if error contains minimum bid price info
+	if minBid, found := parseMinBidFromError(err); found {
+		slog.Info("Bid price rejected, retrying with API-specified minimum",
+			"serverClass", serverClass,
+			"initialBid", initialBid,
+			"requiredMinBid", minBid)
+		createBody.Spec.BidPrice = minBid
+		return createSpotNodePoolRaw(ctx, c.sdk, c.org, c.cloudspaceID, createBody)
+	}
+
+	return err
+}
+
+// tryUpdatePoolWithRetry attempts to update a pool, and if the API rejects the bid price
+// with a 422 error containing the actual minimum, retries with the discovered minimum.
+func (c *Client) tryUpdatePoolWithRetry(ctx context.Context, poolName string, desired int, initialBid float64) error {
+	updateSpec := spotNodePoolUpdateSpec{
+		Desired:  desired,
+		BidPrice: initialBid,
+	}
+
+	err := updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolName, updateSpec)
+	if err == nil {
+		return nil
+	}
+
+	// Check if error contains minimum bid price info
+	if minBid, found := parseMinBidFromError(err); found {
+		slog.Info("Bid price rejected on update, retrying with API-specified minimum",
+			"poolName", poolName,
+			"initialBid", initialBid,
+			"requiredMinBid", minBid)
+		updateSpec.BidPrice = minBid
+		return updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolName, updateSpec)
+	}
+
+	return err
 }
 
 // --- Helper functions ---

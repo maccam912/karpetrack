@@ -325,7 +325,7 @@ func (r *ProvisionerController) provisionNodesForPods(
 					Memory:           &nodeRec.Memory,
 					EphemeralStorage: &nodeRec.Storage,
 				},
-				BidPrice: fmt.Sprintf("%.6f", nodeRec.PricePerHour*1.1), // Bid 10% above market
+				BidPrice: fmt.Sprintf("%.3f", nodeRec.PricePerHour*1.1), // Bid 10% above market
 			},
 		}
 
