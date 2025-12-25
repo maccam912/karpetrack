@@ -25,5 +25,5 @@
 - [x] Task: Conductor - User Manual Verification 'Implementation - Binpacking Logic' (Protocol in workflow.md) 6d499f9
 
 ## Phase 4: Verification
-- [ ] Task: Run full suite of unit tests to ensure no regressions in CPU/RAM scheduling.
+- [~] Task: Run full suite of unit tests to ensure no regressions in CPU/RAM scheduling.
 - [ ] Task: Conductor - User Manual Verification 'Verification' (Protocol in workflow.md)

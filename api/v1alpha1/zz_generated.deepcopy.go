@@ -8,7 +8,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -37,6 +37,11 @@ func (in *Resources) DeepCopyInto(out *Resources) {
 	}
 	if in.Memory != nil {
 		in, out := &in.Memory, &out.Memory
+		x := (*in).DeepCopy()
+		*out = &x
+	}
+	if in.EphemeralStorage != nil {
+		in, out := &in.EphemeralStorage, &out.EphemeralStorage
 		x := (*in).DeepCopy()
 		*out = &x
 	}
@@ -251,6 +256,11 @@ func (in *SpotNodeResources) DeepCopyInto(out *SpotNodeResources) {
 	}
 	if in.Memory != nil {
 		in, out := &in.Memory, &out.Memory
+		x := (*in).DeepCopy()
+		*out = &x
+	}
+	if in.EphemeralStorage != nil {
+		in, out := &in.EphemeralStorage, &out.EphemeralStorage
 		x := (*in).DeepCopy()
 		*out = &x
 	}
