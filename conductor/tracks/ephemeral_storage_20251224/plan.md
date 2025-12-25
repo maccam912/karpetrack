@@ -15,14 +15,14 @@
     - [x] Sub-task: Implement Feature: Add logic to fetch or default storage size for candidate instance types. d674136
 - [x] Task: Conductor - User Manual Verification 'Implementation - Resource Modeling' (Protocol in workflow.md) fd6fdf4
 
-## Phase 3: Implementation - Binpacking Logic [checkpoint: 8220616]
+## Phase 3: Implementation - Binpacking Logic [checkpoint: 6d499f9]
 - [x] Task: Update `Binpacker` to enforce storage constraints. 553c379
     - [x] Sub-task: Write Tests: Create scenarios where CPU/RAM fit but Storage fails. 553c379
     - [x] Sub-task: Implement Feature: Add `storage` check to the `Fit` function in `binpacker.go`. 553c379
 - [x] Task: Update `Provisioner` to use the new binpacking logic for new node creation. 8220616
     - [x] Sub-task: Write Tests: Verify a new node is provisioned when existing nodes lack storage. 8220616
     - [x] Sub-task: Implement Feature: Ensure provisioner respects the hard constraint. 8220616
-- [~] Task: Conductor - User Manual Verification 'Implementation - Binpacking Logic' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Implementation - Binpacking Logic' (Protocol in workflow.md) 6d499f9
 
 ## Phase 4: Verification
 - [ ] Task: Run full suite of unit tests to ensure no regressions in CPU/RAM scheduling.
