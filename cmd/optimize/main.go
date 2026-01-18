@@ -102,7 +102,7 @@ func createSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotCli
 	pool.Kind = "SpotNodePool"
 	pool.Spec.Autoscaling.Enabled = false
 	pool.Spec.CloudSpace = cloudspace
-	
+
 	// Set cloudspace as label in metadata (required by SDK pattern)
 	if pool.Metadata.Labels == nil {
 		pool.Metadata.Labels = make(map[string]string)

@@ -75,7 +75,7 @@ func createSpotNodePoolRaw(ctx context.Context, sdk *rxtspot.RackspaceSpotClient
 	pool.Kind = "SpotNodePool"
 	pool.Spec.Autoscaling.Enabled = false
 	pool.Spec.CloudSpace = cloudspace
-	
+
 	// Set cloudspace as label in metadata (required by SDK pattern)
 	if pool.Metadata.Labels == nil {
 		pool.Metadata.Labels = make(map[string]string)
@@ -88,7 +88,7 @@ func createSpotNodePoolRaw(ctx context.Context, sdk *rxtspot.RackspaceSpotClient
 	if err != nil {
 		return fmt.Errorf("listing organizations: %w", err)
 	}
-	
+
 	var orgID string
 	for _, o := range orgs {
 		if o.Name == org {
@@ -99,7 +99,7 @@ func createSpotNodePoolRaw(ctx context.Context, sdk *rxtspot.RackspaceSpotClient
 	if orgID == "" {
 		return fmt.Errorf("organization '%s' not found", org)
 	}
-	
+
 	pool.Metadata.Namespace = orgID
 
 	body, err := json.Marshal(pool)
@@ -139,7 +139,7 @@ func updateSpotNodePoolRaw(ctx context.Context, sdk *rxtspot.RackspaceSpotClient
 	if err != nil {
 		return fmt.Errorf("listing organizations: %w", err)
 	}
-	
+
 	var orgID string
 	for _, o := range orgs {
 		if o.Name == org {
@@ -559,7 +559,7 @@ func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverCla
 	// Use raw HTTP with numeric bidPrice (API requires number, not string)
 	// Round to 3 decimal places (API maximum)
 	roundedBid := RoundBidPrice(initialBid)
-	
+
 	createBody := spotNodePoolCreateBody{}
 	createBody.Metadata.Name = poolName
 	createBody.Spec = spotNodePoolCreateSpec{
