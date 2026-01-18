@@ -466,18 +466,19 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			if existing.Desired != plan.Count {
 				fmt.Printf("📝 UPDATE: %s (desired: %d → %d)\n", serverClass, existing.Desired, plan.Count)
 				if !config.DryRun {
-					// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-					updateSpec := SpotNodePoolUpdateSpec{
+					// Use SDK method which uses correct API endpoint
+					pool := rxtspot.SpotNodePool{
+						Name:     existing.Name,
 						Desired:  plan.Count,
-						BidPrice: plan.BidPrice,
+						BidPrice: fmt.Sprintf("%.4f", plan.BidPrice),
 					}
-					err := updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
+					err := spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 					if err != nil {
 						// Check if error contains minimum bid price info and retry
 						if minBid, found := parseMinBidFromError(err); found {
 							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
-							updateSpec.BidPrice = minBid
-							err = updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
+							pool.BidPrice = fmt.Sprintf("%.4f", minBid)
+							err = spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 						}
 						if err != nil {
 							return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
@@ -494,25 +495,25 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			fmt.Printf("➕ CREATE: %s (name: %s, desired: %d, bid: $%.4f)\n",
 				serverClass, poolName, plan.Count, plan.BidPrice)
 			if !config.DryRun {
-				// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-				createBody := SpotNodePoolCreateBody{}
-				createBody.Metadata.Name = poolName
-				createBody.Spec = SpotNodePoolCreateSpec{
+				// Use SDK method which uses correct API endpoint
+				pool := rxtspot.SpotNodePool{
+					Name:        poolName,
+					Cloudspace:  config.Cloudspace, // Required by admission webhook
 					ServerClass: serverClass,
 					Desired:     plan.Count,
-					BidPrice:    plan.BidPrice,
+					BidPrice:    fmt.Sprintf("%.4f", plan.BidPrice),
 					CustomLabels: map[string]string{
 						"karpetrack.io/managed":      "true",
 						"karpetrack.io/server-class": sanitizeName(serverClass),
 					},
 				}
-				err := createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
+				err := spotClient.CreateSpotNodePool(ctx, config.Org, pool)
 				if err != nil {
 					// Check if error contains minimum bid price info and retry
 					if minBid, found := parseMinBidFromError(err); found {
 						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
-						createBody.Spec.BidPrice = minBid
-						err = createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
+						pool.BidPrice = fmt.Sprintf("%.4f", minBid)
+						err = spotClient.CreateSpotNodePool(ctx, config.Org, pool)
 					}
 					if err != nil {
 						return fmt.Errorf("creating node pool %s: %w", poolName, err)

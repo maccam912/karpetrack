@@ -354,14 +354,15 @@ func (c *Client) DeleteNode(ctx context.Context, nodeID string) error {
 			return fmt.Errorf("deleting pool %s: %w", poolName, err)
 		}
 	} else {
-		// Decrement desired count
-		// Parse bid price from string to float64 (SDK returns string)
+		// Decrement desired count using SDK method
+		// Parse bid price from string (SDK returns string like "$0.0100")
 		bidPrice := parseBidPrice(targetPool.BidPrice)
-		// Use raw HTTP to send bidPrice as a number (SDK sends it as string)
-		if err := updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolName, spotNodePoolUpdateSpec{
+		pool := rxtspot.SpotNodePool{
+			Name:     poolName,
 			Desired:  targetPool.Desired - 1,
-			BidPrice: bidPrice,
-		}); err != nil {
+			BidPrice: fmt.Sprintf("%.4f", bidPrice),
+		}
+		if err := c.sdk.UpdateSpotNodePool(ctx, c.org, pool); err != nil {
 			return fmt.Errorf("updating pool %s: %w", poolName, err)
 		}
 	}
@@ -501,19 +502,21 @@ func (c *Client) ListManagedPools(ctx context.Context) ([]*rxtspot.SpotNodePool,
 // tryCreatePoolWithRetry attempts to create a pool, and if the API rejects the bid price
 // with a 422 error containing the actual minimum, retries with the discovered minimum.
 func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverClass string, desired int, initialBid float64) error {
-	createBody := spotNodePoolCreateBody{}
-	createBody.Metadata.Name = poolName
-	createBody.Spec = spotNodePoolCreateSpec{
+	// Use SDK's CreateSpotNodePool method which uses the correct API endpoint:
+	// /apis/ngpc.rxt.io/v1/namespaces/{orgID}/spotnodepools (not /v1/orgs/.../cloudspaces/...)
+	pool := rxtspot.SpotNodePool{
+		Name:        poolName,
+		Cloudspace:  c.cloudspaceID, // Required field - goes into metadata labels
 		ServerClass: serverClass,
 		Desired:     desired,
-		BidPrice:    initialBid,
+		BidPrice:    fmt.Sprintf("%.4f", initialBid),
 		CustomLabels: map[string]string{
 			"karpetrack.io/managed":      "true",
 			"karpetrack.io/server-class": sanitizeLabel(serverClass),
 		},
 	}
 
-	err := createSpotNodePoolRaw(ctx, c.sdk, c.org, c.cloudspaceID, createBody)
+	err := c.sdk.CreateSpotNodePool(ctx, c.org, pool)
 	if err == nil {
 		return nil
 	}
@@ -524,8 +527,8 @@ func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverCla
 			"serverClass", serverClass,
 			"initialBid", initialBid,
 			"requiredMinBid", minBid)
-		createBody.Spec.BidPrice = minBid
-		return createSpotNodePoolRaw(ctx, c.sdk, c.org, c.cloudspaceID, createBody)
+		pool.BidPrice = fmt.Sprintf("%.4f", minBid)
+		return c.sdk.CreateSpotNodePool(ctx, c.org, pool)
 	}
 
 	return err
@@ -534,12 +537,14 @@ func (c *Client) tryCreatePoolWithRetry(ctx context.Context, poolName, serverCla
 // tryUpdatePoolWithRetry attempts to update a pool, and if the API rejects the bid price
 // with a 422 error containing the actual minimum, retries with the discovered minimum.
 func (c *Client) tryUpdatePoolWithRetry(ctx context.Context, poolName string, desired int, initialBid float64) error {
-	updateSpec := spotNodePoolUpdateSpec{
+	// Use SDK's UpdateSpotNodePool method which uses the correct API endpoint
+	pool := rxtspot.SpotNodePool{
+		Name:     poolName,
 		Desired:  desired,
-		BidPrice: initialBid,
+		BidPrice: fmt.Sprintf("%.4f", initialBid),
 	}
 
-	err := updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolName, updateSpec)
+	err := c.sdk.UpdateSpotNodePool(ctx, c.org, pool)
 	if err == nil {
 		return nil
 	}
@@ -550,8 +555,8 @@ func (c *Client) tryUpdatePoolWithRetry(ctx context.Context, poolName string, de
 			"poolName", poolName,
 			"initialBid", initialBid,
 			"requiredMinBid", minBid)
-		updateSpec.BidPrice = minBid
-		return updateSpotNodePoolRaw(ctx, c.sdk, c.org, poolName, updateSpec)
+		pool.BidPrice = fmt.Sprintf("%.4f", minBid)
+		return c.sdk.UpdateSpotNodePool(ctx, c.org, pool)
 	}
 
 	return err
