@@ -169,8 +169,15 @@ func (p *PricingProvider) GetInstanceTypes(ctx context.Context) ([]InstanceOptio
 	var options []InstanceOption
 	for regionName, region := range pricing.Regions {
 		for instanceType, serverClass := range region.ServerClasses {
+			// Skip instances with missing/invalid data
+			if serverClass.DisplayName == "" || serverClass.Category == "" {
+				continue
+			}
+			if serverClass.CPU <= 0 || serverClass.Memory <= 0 {
+				continue
+			}
 			marketPrice, err := strconv.ParseFloat(serverClass.MarketPrice, 64)
-			if err != nil {
+			if err != nil || marketPrice <= 0 {
 				continue // Skip invalid prices
 			}
 
