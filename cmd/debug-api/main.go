@@ -173,7 +173,7 @@ func testCreateNodePool(ctx context.Context, client *rxtspot.RackspaceSpotClient
 		},
 		"spec": map[string]interface{}{
 			"serverClass": "gp.vs1.medium-ord", // Small instance for testing
-			"desired":     0,                    // 0 desired so we don't actually spin anything up
+			"desired":     0,                   // 0 desired so we don't actually spin anything up
 			"bidPrice":    0.01,
 			"autoscaling": map[string]interface{}{
 				"enabled":  false,
@@ -294,4 +294,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-
