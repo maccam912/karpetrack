@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -35,6 +36,7 @@ type SpotNodePoolCreateSpec struct {
 	ServerClass       string            `json:"serverClass"`
 	Desired           int               `json:"desired"`
 	BidPrice          float64           `json:"bidPrice"`
+	CloudSpace        string            `json:"cloudSpace"` // Required by admission webhook
 	CustomAnnotations map[string]string `json:"customAnnotations,omitempty"`
 	CustomLabels      map[string]string `json:"customLabels,omitempty"`
 	CustomTaints      []interface{}     `json:"customTaints,omitempty"`
@@ -45,14 +47,19 @@ type SpotNodePoolCreateSpec struct {
 	} `json:"autoscaling"`
 }
 
+// SpotNodePoolCreateMetadata matches SDK format with labels for cloudspace
+type SpotNodePoolCreateMetadata struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace,omitempty"`
+	Labels    map[string]string `json:"labels,omitempty"`
+}
+
 // SpotNodePoolCreateBody is the request body for creating a spot node pool.
 type SpotNodePoolCreateBody struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Metadata   struct {
-		Name string `json:"name"`
-	} `json:"metadata"`
-	Spec SpotNodePoolCreateSpec `json:"spec"`
+	APIVersion string                     `json:"apiVersion"`
+	Kind       string                     `json:"kind"`
+	Metadata   SpotNodePoolCreateMetadata `json:"metadata"`
+	Spec       SpotNodePoolCreateSpec     `json:"spec"`
 }
 
 // SpotNodePoolUpdateSpec is the spec for updating a spot node pool with numeric bidPrice.
@@ -74,18 +81,48 @@ type SpotNodePoolUpdateBody struct {
 	Spec SpotNodePoolUpdateSpec `json:"spec"`
 }
 
+// getOrgID looks up the org ID (namespace) from the org name
+func getOrgID(ctx context.Context, client *rxtspot.RackspaceSpotClient, org string) (string, error) {
+	orgs, err := client.ListOrganizations(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing organizations: %w", err)
+	}
+	for _, o := range orgs {
+		if o.Name == org {
+			return o.ID, nil
+		}
+	}
+	return "", fmt.Errorf("organization '%s' not found", org)
+}
+
 // createSpotNodePoolRaw creates a spot node pool using raw HTTP with numeric bidPrice.
+// Uses the correct SDK endpoint: /apis/ngpc.rxt.io/v1/namespaces/{orgID}/spotnodepools
 func createSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotClient, org, cloudspace string, pool SpotNodePoolCreateBody) error {
 	pool.APIVersion = "ngpc.rxt.io/v1"
 	pool.Kind = "SpotNodePool"
 	pool.Spec.Autoscaling.Enabled = false
+	pool.Spec.CloudSpace = cloudspace
+	
+	// Set cloudspace as label in metadata (required by SDK pattern)
+	if pool.Metadata.Labels == nil {
+		pool.Metadata.Labels = make(map[string]string)
+	}
+	pool.Metadata.Labels["ngpc.rxt.io/cloudspace"] = cloudspace
+
+	// Get org ID (namespace)
+	orgID, err := getOrgID(ctx, client, org)
+	if err != nil {
+		return err
+	}
+	pool.Metadata.Namespace = orgID
 
 	body, err := json.Marshal(pool)
 	if err != nil {
 		return fmt.Errorf("marshaling request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1/orgs/%s/cloudspaces/%s/spotnodepools", client.BaseURL, org, cloudspace)
+	// Use the correct SDK endpoint pattern
+	url := fmt.Sprintf("%s/apis/ngpc.rxt.io/v1/namespaces/%s/spotnodepools", client.BaseURL, orgID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -109,13 +146,21 @@ func createSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotCli
 }
 
 // updateSpotNodePoolRaw updates a spot node pool using raw HTTP with numeric bidPrice.
+// Uses the correct SDK endpoint: /apis/ngpc.rxt.io/v1/namespaces/{orgID}/spotnodepools/{poolName}
 func updateSpotNodePoolRaw(ctx context.Context, client *rxtspot.RackspaceSpotClient, org, poolName string, spec SpotNodePoolUpdateSpec) error {
+	// Get org ID (namespace)
+	orgID, err := getOrgID(ctx, client, org)
+	if err != nil {
+		return err
+	}
+
 	body, err := json.Marshal(SpotNodePoolUpdateBody{Spec: spec})
 	if err != nil {
 		return fmt.Errorf("marshaling request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1/orgs/%s/spotnodepools/%s", client.BaseURL, org, poolName)
+	// Use the correct SDK endpoint pattern
+	url := fmt.Sprintf("%s/apis/ngpc.rxt.io/v1/namespaces/%s/spotnodepools/%s", client.BaseURL, orgID, poolName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -153,6 +198,16 @@ func parseMinBidFromError(err error) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// roundBidPrice rounds bid price to 3 decimal places (API maximum).
+// Also rounds up to the nearest 0.005 as required by the admission webhook.
+func roundBidPrice(price float64) float64 {
+	// Round up to nearest 0.005
+	multiple := 0.005
+	rounded := math.Ceil(price/multiple) * multiple
+	// Ensure 3 decimal places max
+	return math.Round(rounded*1000) / 1000
 }
 
 type Config struct {
@@ -466,19 +521,19 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			if existing.Desired != plan.Count {
 				fmt.Printf("📝 UPDATE: %s (desired: %d → %d)\n", serverClass, existing.Desired, plan.Count)
 				if !config.DryRun {
-					// Use SDK method which uses correct API endpoint
-					pool := rxtspot.SpotNodePool{
-						Name:     existing.Name,
+					// Use raw HTTP with numeric bidPrice (API requires number, max 3 decimals)
+					roundedBid := roundBidPrice(plan.BidPrice)
+					updateSpec := SpotNodePoolUpdateSpec{
 						Desired:  plan.Count,
-						BidPrice: fmt.Sprintf("%.4f", plan.BidPrice),
+						BidPrice: roundedBid,
 					}
-					err := spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
+					err := updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
 					if err != nil {
 						// Check if error contains minimum bid price info and retry
 						if minBid, found := parseMinBidFromError(err); found {
-							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
-							pool.BidPrice = fmt.Sprintf("%.4f", minBid)
-							err = spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
+							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.3f", serverClass, minBid)
+							updateSpec.BidPrice = roundBidPrice(minBid)
+							err = updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
 						}
 						if err != nil {
 							return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
@@ -492,28 +547,29 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 		} else {
 			// Create new pool - API requires lowercase UUID as pool name
 			poolName := uuid.New().String()
-			fmt.Printf("➕ CREATE: %s (name: %s, desired: %d, bid: $%.4f)\n",
-				serverClass, poolName, plan.Count, plan.BidPrice)
+			fmt.Printf("➕ CREATE: %s (name: %s, desired: %d, bid: $%.3f)\n",
+				serverClass, poolName, plan.Count, roundBidPrice(plan.BidPrice))
 			if !config.DryRun {
-				// Use SDK method which uses correct API endpoint
-				pool := rxtspot.SpotNodePool{
-					Name:        poolName,
-					Cloudspace:  config.Cloudspace, // Required by admission webhook
+				// Use raw HTTP with numeric bidPrice (API requires number, max 3 decimals)
+				roundedBid := roundBidPrice(plan.BidPrice)
+				createBody := SpotNodePoolCreateBody{}
+				createBody.Metadata.Name = poolName
+				createBody.Spec = SpotNodePoolCreateSpec{
 					ServerClass: serverClass,
 					Desired:     plan.Count,
-					BidPrice:    fmt.Sprintf("%.4f", plan.BidPrice),
+					BidPrice:    roundedBid,
 					CustomLabels: map[string]string{
 						"karpetrack.io/managed":      "true",
 						"karpetrack.io/server-class": sanitizeName(serverClass),
 					},
 				}
-				err := spotClient.CreateSpotNodePool(ctx, config.Org, pool)
+				err := createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
 				if err != nil {
 					// Check if error contains minimum bid price info and retry
 					if minBid, found := parseMinBidFromError(err); found {
-						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.6f", serverClass, minBid)
-						pool.BidPrice = fmt.Sprintf("%.4f", minBid)
-						err = spotClient.CreateSpotNodePool(ctx, config.Org, pool)
+						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.3f", serverClass, minBid)
+						createBody.Spec.BidPrice = roundBidPrice(minBid)
+						err = createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
 					}
 					if err != nil {
 						return fmt.Errorf("creating node pool %s: %w", poolName, err)
