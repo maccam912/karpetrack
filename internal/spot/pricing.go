@@ -25,7 +25,27 @@ const (
 
 	// MinimumBidPrice is the universal minimum bid for all Rackspace Spot instances ($0.001/hr)
 	MinimumBidPrice = 0.001
+
+	// BidPriceStep is the required increment for bid prices ($0.005)
+	// The Rackspace Spot API requires bid prices to be multiples of this value
+	BidPriceStep = 0.005
 )
+
+// RoundBidPrice rounds a bid price up to the nearest valid multiple of BidPriceStep.
+// The Rackspace Spot API requires bid prices to be multiples of 0.005.
+func RoundBidPrice(price float64) float64 {
+	if price <= 0 {
+		return BidPriceStep
+	}
+	// Round up to nearest multiple of BidPriceStep
+	// Using math.Ceil logic: (price / step) rounded up, then * step
+	steps := price / BidPriceStep
+	rounded := float64(int(steps))
+	if steps > rounded {
+		rounded++
+	}
+	return rounded * BidPriceStep
+}
 
 // categoryAliases maps shorthand category names to full API category names
 var categoryAliases = map[string]string{
@@ -280,7 +300,7 @@ func (p *PricingProvider) GetPriceForServerClass(ctx context.Context, serverClas
 }
 
 // GetBidPriceForServerClass returns the recommended bid price for a server class.
-// Returns max(market_price, 50th_percentile) to ensure bids are competitive.
+// Returns max(market_price, 50th_percentile) rounded up to the nearest valid increment.
 // Server class format: category.generation.size-region (e.g., "gp.vs1.medium-dfw")
 func (p *PricingProvider) GetBidPriceForServerClass(ctx context.Context, serverClass string) (float64, error) {
 	// Parse server class to extract region and base instance type
@@ -312,11 +332,12 @@ func (p *PricingProvider) GetBidPriceForServerClass(ctx context.Context, serverC
 		return 0, fmt.Errorf("parsing market price: %w", err)
 	}
 
-	// Return max(market_price, 50th_percentile)
+	// Use max(market_price, 50th_percentile), rounded up to valid increment
+	bidPrice := marketPrice
 	if sc.Percentile50 > marketPrice {
-		return sc.Percentile50, nil
+		bidPrice = sc.Percentile50
 	}
-	return marketPrice, nil
+	return RoundBidPrice(bidPrice), nil
 }
 
 // FindCheaperAlternative finds a cheaper instance that can replace the given one
