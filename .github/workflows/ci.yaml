@@ -56,8 +56,8 @@ jobs:
           go-version: '1.22'
           cache: true
 
-      - name: Build binary
-        run: CGO_ENABLED=0 GOOS=linux go build -o bin/controller ./cmd/controller
+      - name: Build optimizer binary
+        run: CGO_ENABLED=0 GOOS=linux go build -o bin/karpetrack-optimize ./cmd/optimize
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -66,22 +66,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.optimize
           push: false
-          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository }}/optimizer-cli:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  lint-helm:
-    name: Lint Helm Chart
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
-
-      - name: Lint Helm chart
-        run: helm lint charts/karpetrack
