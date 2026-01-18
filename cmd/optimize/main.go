@@ -521,19 +521,21 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 			if existing.Desired != plan.Count {
 				fmt.Printf("📝 UPDATE: %s (desired: %d → %d)\n", serverClass, existing.Desired, plan.Count)
 				if !config.DryRun {
-					// Use raw HTTP with numeric bidPrice (API requires number, max 3 decimals)
+					// Use SDK method which is proven to work (see debug tool)
+					// BidPrice must be 3 decimal places or less
 					roundedBid := roundBidPrice(plan.BidPrice)
-					updateSpec := SpotNodePoolUpdateSpec{
+					pool := rxtspot.SpotNodePool{
+						Name:     existing.Name,
 						Desired:  plan.Count,
-						BidPrice: roundedBid,
+						BidPrice: fmt.Sprintf("%.3f", roundedBid),
 					}
-					err := updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
+					err := spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 					if err != nil {
 						// Check if error contains minimum bid price info and retry
 						if minBid, found := parseMinBidFromError(err); found {
 							log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.3f", serverClass, minBid)
-							updateSpec.BidPrice = roundBidPrice(minBid)
-							err = updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
+							pool.BidPrice = fmt.Sprintf("%.3f", roundBidPrice(minBid))
+							err = spotClient.UpdateSpotNodePool(ctx, config.Org, pool)
 						}
 						if err != nil {
 							return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
@@ -547,29 +549,30 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 		} else {
 			// Create new pool - API requires lowercase UUID as pool name
 			poolName := uuid.New().String()
+			roundedBid := roundBidPrice(plan.BidPrice)
 			fmt.Printf("➕ CREATE: %s (name: %s, desired: %d, bid: $%.3f)\n",
-				serverClass, poolName, plan.Count, roundBidPrice(plan.BidPrice))
+				serverClass, poolName, plan.Count, roundedBid)
 			if !config.DryRun {
-				// Use raw HTTP with numeric bidPrice (API requires number, max 3 decimals)
-				roundedBid := roundBidPrice(plan.BidPrice)
-				createBody := SpotNodePoolCreateBody{}
-				createBody.Metadata.Name = poolName
-				createBody.Spec = SpotNodePoolCreateSpec{
+				// Use SDK method which is proven to work (see debug tool)
+				// BidPrice must be 3 decimal places or less
+				pool := rxtspot.SpotNodePool{
+					Name:        poolName,
+					Cloudspace:  config.Cloudspace, // Required by admission webhook
 					ServerClass: serverClass,
 					Desired:     plan.Count,
-					BidPrice:    roundedBid,
+					BidPrice:    fmt.Sprintf("%.3f", roundedBid),
 					CustomLabels: map[string]string{
 						"karpetrack.io/managed":      "true",
 						"karpetrack.io/server-class": sanitizeName(serverClass),
 					},
 				}
-				err := createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
+				err := spotClient.CreateSpotNodePool(ctx, config.Org, pool)
 				if err != nil {
 					// Check if error contains minimum bid price info and retry
 					if minBid, found := parseMinBidFromError(err); found {
 						log.Printf("Bid price rejected for %s, retrying with API-specified minimum: $%.3f", serverClass, minBid)
-						createBody.Spec.BidPrice = roundBidPrice(minBid)
-						err = createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
+						pool.BidPrice = fmt.Sprintf("%.3f", roundBidPrice(minBid))
+						err = spotClient.CreateSpotNodePool(ctx, config.Org, pool)
 					}
 					if err != nil {
 						return fmt.Errorf("creating node pool %s: %w", poolName, err)
