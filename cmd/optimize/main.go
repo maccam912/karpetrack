@@ -708,7 +708,8 @@ func buildNodePoolPlan(result *scheduler.OptimizationResult) map[string]NodePool
 		// Use the price from optimization (max of market, 50th percentile)
 		// Keep the higher price if we've seen this instance type before
 		if node.PricePerHour > existing.BidPrice {
-			existing.BidPrice = node.PricePerHour
+			// Round bid price to nearest valid multiple of 0.005 (required by API)
+			existing.BidPrice = spot.RoundBidPrice(node.PricePerHour)
 		}
 		plan[node.InstanceType] = existing
 	}

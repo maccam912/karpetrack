@@ -1,5 +1,5 @@
-# Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/maccam912/karpetrack:latest
+# Image URL for the optimizer
+IMG_OPTIMIZE ?= ghcr.io/maccam912/karpetrack-optimize:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -42,8 +42,7 @@ lint: ## Run golangci-lint
 ##@ Build
 
 .PHONY: build
-build: fmt vet ## Build manager binary.
-	go build -o bin/controller ./cmd/controller
+build: build-optimize ## Build all binaries.
 
 .PHONY: build-optimize
 build-optimize: fmt vet ## Build optimize CLI binary.
@@ -53,49 +52,12 @@ build-optimize: fmt vet ## Build optimize CLI binary.
 build-discover-minbids: fmt vet ## Build discover-minbids CLI binary.
 	go build -o bin/discover-minbids ./cmd/discover-minbids
 
-.PHONY: run
-run: fmt vet ## Run a controller from your host.
-	go run ./cmd/controller
+##@ Docker
 
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	docker build -t ${IMG} .
+docker-build: ## Build docker image for the optimizer.
+	docker build -f Dockerfile.optimize -t ${IMG_OPTIMIZE} .
 
 .PHONY: docker-push
-docker-push: ## Push docker image with the manager.
-	docker push ${IMG}
-
-##@ Deployment
-
-.PHONY: install
-install: ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	kubectl apply -k config/crd
-
-.PHONY: uninstall
-uninstall: ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
-	kubectl delete -k config/crd
-
-.PHONY: deploy
-deploy: ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	kubectl apply -k config/default
-
-.PHONY: undeploy
-undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
-	kubectl delete -k config/default
-
-##@ Code Generation
-
-.PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-
-.PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=karpetrack-controller crd paths="./..." output:crd:artifacts:config=config/crd/bases
-
-##@ Tools
-
-CONTROLLER_GEN = $(GOBIN)/controller-gen
-.PHONY: controller-gen
-controller-gen: ## Download controller-gen locally if necessary.
-	@test -s $(CONTROLLER_GEN) || go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+docker-push: ## Push docker image for the optimizer.
+	docker push ${IMG_OPTIMIZE}
