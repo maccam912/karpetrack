@@ -169,4 +169,3 @@ func (nc NodeCapacity) Utilization(pods []PodRequirements) float64 {
 	storageUtil := float64(usedStorage.Value()) / float64(nc.EphemeralStorage.Value())
 	return (cpuUtil + memUtil + storageUtil) / 3
 }
-

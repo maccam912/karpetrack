@@ -41,7 +41,6 @@ func makeNodeCapWithStorage(region, instanceType string, cpu int, memGi int, sto
 	return nc
 }
 
-
 func makeDaemonSetOverhead(cpuMillis int64, memMi int64) *DaemonSetOverhead {
 	return &DaemonSetOverhead{
 		CPU:    *resource.NewMilliQuantity(cpuMillis, resource.DecimalSI),

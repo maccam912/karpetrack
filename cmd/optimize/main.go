@@ -273,7 +273,7 @@ func run(config Config) error {
 
 	// Fetch pods (both running and pending)
 
-pods, namespaces, podCounts, err := fetchPods(ctx, clientset, config.Namespaces)
+	pods, namespaces, podCounts, err := fetchPods(ctx, clientset, config.Namespaces)
 	if err != nil {
 		return fmt.Errorf("fetching pods: %w", err)
 	}
@@ -285,7 +285,7 @@ pods, namespaces, podCounts, err := fetchPods(ctx, clientset, config.Namespaces)
 
 	// Extract requirements from pods
 
-podReqs := make([]scheduler.PodRequirements, 0, len(pods))
+	podReqs := make([]scheduler.PodRequirements, 0, len(pods))
 	for _, pod := range pods {
 		podReqs = append(podReqs, scheduler.GetPodRequirements(pod))
 	}
@@ -403,7 +403,7 @@ func applyConfiguration(ctx context.Context, config Config, result *scheduler.Op
 
 	// Detect and clean up lost pools first
 
-lostPools := detectLostPools(existingPools)
+	lostPools := detectLostPools(existingPools)
 	if len(lostPools) > 0 {
 		fmt.Println()
 		fmt.Println("═══════════════════════════════════════════════════════════════")
@@ -479,7 +479,7 @@ lostPools := detectLostPools(existingPools)
 							updateSpec.BidPrice = minBid
 							err = updateSpotNodePoolRaw(ctx, spotClient, config.Org, existing.Name, updateSpec)
 						}
-							if err != nil {
+						if err != nil {
 							return fmt.Errorf("updating node pool %s: %w", existing.Name, err)
 						}
 					}
@@ -514,7 +514,7 @@ lostPools := detectLostPools(existingPools)
 						createBody.Spec.BidPrice = minBid
 						err = createSpotNodePoolRaw(ctx, spotClient, config.Org, config.Cloudspace, createBody)
 					}
-						if err != nil {
+					if err != nil {
 						return fmt.Errorf("creating node pool %s: %w", poolName, err)
 					}
 				}

@@ -406,11 +406,11 @@ func TestCostOptimizer_EphemeralStorageConstraint(t *testing.T) {
 		Categories: []string{"gp"},
 	}
 
-	// This should fail if no nodes have > 40Gi storage, 
+	// This should fail if no nodes have > 40Gi storage,
 	// or it should pick a node that happens to have more if we had any in our mock/real data.
 	// Since we currently default to 40Gi, it should fail to find a node.
 	result, err := optimizer.FindOptimalConfiguration(ctx, pods, constraints)
-	
+
 	if err == nil {
 		// If it succeeded, check if the node actually has enough storage
 		for _, node := range result.Nodes {

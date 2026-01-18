@@ -63,8 +63,8 @@ type ServerClass struct {
 	Category     string  `json:"category"`
 	Description  string  `json:"description"`
 	CPU          FlexInt `json:"cpu"`
-	Memory       FlexInt `json:"memory"`             // in GB
-	Storage      FlexInt `json:"storage,omitempty"`   // in GB
+	Memory       FlexInt `json:"memory"`            // in GB
+	Storage      FlexInt `json:"storage,omitempty"` // in GB
 	MarketPrice  string  `json:"market_price"`
 	Percentile20 float64 `json:"20_percentile"`
 	Percentile50 float64 `json:"50_percentile"`
